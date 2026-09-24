@@ -1,0 +1,15 @@
+{
+  "name": "legacy-agent-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "面向不可修改的存量校园系统的自然语言任务编排层（零第三方依赖）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/api/server.js",
+    "probe": "node scripts/probe-legacy.js",
+    "selftest": "node test/selftest.js"
+  }
+}

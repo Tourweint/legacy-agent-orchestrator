@@ -1,0 +1,14 @@
+spring:
+  #  激活local配置
+  profiles:
+    active: local
+  application:
+    name: campusClassroomReservationSystem
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    url: /openapi.yaml
+    disable-swagger-default-url: true
+server:
+  address: 0.0.0.0
+  port: 8080
