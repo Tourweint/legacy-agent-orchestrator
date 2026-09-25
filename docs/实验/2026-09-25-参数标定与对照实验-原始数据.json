@@ -1,0 +1,142 @@
+{
+  "at": "2026-09-25T11:37:25.056Z",
+  "model": "qwen-plus",
+  "sections": {
+    "B3": {
+      "light": {
+        "n": 50,
+        "min": 1,
+        "p50": 2,
+        "p95": 5,
+        "max": 121,
+        "avg": 5
+      },
+      "heavy": {
+        "n": 10,
+        "min": 8,
+        "p50": 9,
+        "p95": 81,
+        "max": 81,
+        "avg": 16
+      },
+      "timeoutsMs": {
+        "write": 3000,
+        "read": 3000,
+        "readHeavyList": 5000
+      },
+      "margins": {
+        "write": "37",
+        "readHeavy": "62"
+      }
+    },
+    "C16": {
+      "truncationAt": 500,
+      "measured": {
+        "classroom.detail": {
+          "bodyLength": 154,
+          "codeVisibleIn500": true
+        },
+        "admin.reservations(86+行)": {
+          "bodyLength": 64087,
+          "codeVisibleIn500": true
+        },
+        "maintenance(空列表)": {
+          "bodyLength": 582,
+          "codeVisibleIn500": true
+        }
+      }
+    },
+    "E6_D7": {
+      "sampleCount": 30,
+      "withoutInterface": {
+        "schemaPass": 28,
+        "intentCorrect": 20,
+        "scoredIntent": 20,
+        "oodCorrect": 26,
+        "scoredOod": 26,
+        "confidences": {
+          "high": [
+            0.92,
+            0.88,
+            0.93,
+            0.85,
+            0.93,
+            0.95,
+            0.93,
+            0.95,
+            0.9,
+            0.95,
+            0.93,
+            0.95,
+            0.93,
+            0.93,
+            0.65,
+            0.85,
+            0.75,
+            0.85,
+            0.85,
+            0.85
+          ],
+          "low": []
+        },
+        "misses": []
+      },
+      "withInterface": {
+        "schemaPass": 28,
+        "intentCorrect": 20,
+        "scoredIntent": 20,
+        "oodCorrect": 26,
+        "scoredOod": 26,
+        "confidences": {
+          "high": [
+            0.92,
+            0.85,
+            0.93,
+            0.85,
+            0.93,
+            0.93,
+            0.93,
+            0.93,
+            0.9,
+            0.95,
+            0.93,
+            0.88,
+            0.93,
+            0.93,
+            0.6,
+            0.75,
+            0.85,
+            0.75,
+            0.75,
+            0.85
+          ],
+          "low": []
+        },
+        "misses": []
+      },
+      "misses": {
+        "without": [],
+        "with": []
+      }
+    },
+    "E1": {
+      "threshold": 0.55,
+      "correctConfidence": {
+        "n": 20,
+        "min": 0.65,
+        "p50": 0.93,
+        "p95": 0.95,
+        "max": 0.95,
+        "avg": 1
+      },
+      "wrongConfidence": null
+    },
+    "H3": {
+      "outcomes": [
+        "UNRESOLVED"
+      ],
+      "stable": true,
+      "construction": "T5 注入 create 第 1 次（真实落库后丢响应）+ T1 阻断查证主路径（含内部重试）与降级 mine 路径 → INCONCLUSIVE → UNRESOLVED"
+    }
+  }
+}
