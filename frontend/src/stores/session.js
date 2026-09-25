@@ -63,7 +63,13 @@ export const useSessionStore = defineStore('session', {
     },
 
     async logout() {
-      await apiLogout()
+      try {
+        await apiLogout()
+      } catch (err) {
+        // 登出请求失败也必须清掉本地会话：不能因为网络抖动让用户"退不出去"（如实说明即可）
+        this.error = '已退出本机会话（服务器未确认，可刷新页面确认）'
+        console.error('[logout] 登出请求失败', err)
+      }
       this.user = null
       this.role = null
       this.status = 'anonymous'

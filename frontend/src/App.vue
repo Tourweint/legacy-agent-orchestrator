@@ -22,7 +22,13 @@ function toggleTheme() {
 }
 
 async function logout() {
-  task._reset() // 换个人登录不该看见上一个人的任务
+  // 顺序与容错都是刻意的：先清上一个人的任务视图（换个人不该看见它），
+  // 但**任何一步出问题都不能让人退不出去**——退出登录本身必须总能完成。
+  try {
+    task._reset()
+  } catch (err) {
+    console.error('[logout] 重置任务视图失败（不影响退出登录）', err)
+  }
   await session.logout()
 }
 
