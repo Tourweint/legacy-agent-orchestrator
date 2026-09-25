@@ -63,8 +63,18 @@ function readBody(req) {
 
 // ---- 形状校验（只管形状：字段存在与类型；可办性归判定层）----
 // 注意：identity 不再校验——登录后身份由会话派生（三审拍板：传了忽略、不传不报 4004）
-function validateTaskBody(body) {
+function validateTaskBody(body, configStore) {
   if (typeof body.intentId !== 'string' || !body.intentId) return { code: ERROR_CODES.UNKNOWN_INTENT, message: '缺少 intentId' }
+  // 目标不是教室的意图（C7 的"我的预约 / 撤销我的预约"）：不要求 resources 与 slot——
+  // 它们的目标是"我自己的记录"，由引擎从"我的预约"里定位（意图计划声明 requiresEntityResolution: false）。
+  // 未登记的意图照旧走下面的严格校验（不因为读不到计划就放宽）。
+  let targetless = false
+  try {
+    targetless = configStore?.getIntent?.(body.intentId)?.requiresEntityResolution === false
+  } catch {
+    targetless = false
+  }
+  if (targetless) return null
   if (!Array.isArray(body.resources) || body.resources.length === 0) return { code: ERROR_CODES.BAD_RESOURCES, message: '缺少 resources（至少一个资源目标）' }
   for (const r of body.resources) {
     const c = r?.classroom
@@ -190,7 +200,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           sendJson(res, 400, ERROR_CODES.BAD_JSON, '请求体不是合法 JSON')
           return
         }
-        const invalid = validateTaskBody(body)
+        const invalid = validateTaskBody(body, configStore)
         if (invalid) {
           sendJson(res, 400, invalid.code, invalid.message)
           return
@@ -208,8 +218,9 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           run: runner
             .executeTask({
               intentId: body.intentId,
+              // 目标不是教室的意图可以不传 resources / slot（引擎自己从"我的预约"里定位）
               resources: body.resources,
-              slot: { start: new Date(body.slot.start), end: new Date(body.slot.end) },
+              slot: body.slot ? { start: new Date(body.slot.start), end: new Date(body.slot.end) } : null,
               reason: body.reason,
               identity: identityOf(session),
             })

@@ -41,6 +41,14 @@ function asLabel(expr, inner) {
 }
 
 /**
+ * 目标记录的编号（C7）：编排层把"当前目标"挂在 target.classroom 下（教室型意图的历史形状），
+ * 记录型意图的 recordId 也在其中；两种写法都认，避免算子依赖某一种挂法。
+ */
+function targetRecordId(ctx) {
+  return ctx.target?.classroom?.recordId ?? ctx.target?.recordId ?? null
+}
+
+/**
  * 求值谓词表达式。表达式是纯数据（来自 propositions.yaml），算子是封闭集合。
  * 组合算子（all/any/not）直接以键名出现，不带 op 字段——如 {all: [...]}、{not: {...}}。
  */
@@ -135,6 +143,17 @@ const HANDLERS = {
     }
     return { satisfied: false }
   },
+  // C7：目标记录在"我的记录"里（撤销前的守卫——只能撤自己的，且必须是生效中的那条）
+  // 与 overlap-exists 的区别：它问的是"这条记录是不是我的、还生效吗"，不是"这个时段被占了吗"。
+  'record-in-mine': (expr, ctx) => {
+    const fact = getFact(ctx, expr.fact)
+    if (fact.state !== 'obtained') throw new JudgmentError(`算子 record-in-mine 要求 ${expr.fact} 已获得`)
+    const recordId = targetRecordId(ctx)
+    if (recordId == null) throw new JudgmentError('算子 record-in-mine 需要目标记录已定位（recordId）')
+    const row = (fact.value ?? []).find((r) => r.recordId === recordId)
+    return { satisfied: Boolean(row) && row.status === 'ACTIVE', matched: row ?? null }
+  },
+  'record-unknown': (_expr, ctx) => targetRecordId(ctx) == null,
   'maintenance-overlaps': (expr, ctx) => {
     const fact = getFact(ctx, expr.fact)
     if (fact.state !== 'obtained') throw new JudgmentError(`算子 maintenance-overlaps 要求 ${expr.fact} 已获得`)

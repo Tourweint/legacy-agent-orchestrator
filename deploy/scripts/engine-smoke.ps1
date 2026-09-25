@@ -19,7 +19,9 @@
 param(
   [int]$EnginePort = 8090,
   [string]$Username = '233',
-  [string]$PasswordEnv = 'ORCH_LEGACY_TEACHER_PASSWORD'
+  [string]$PasswordEnv = 'ORCH_LEGACY_TEACHER_PASSWORD',
+  # 默认零写入；加 -IncludeWriteCheck 才跑"借→查→退→复查"闭环（会造一条预约并撤销它）
+  [switch]$IncludeWriteCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,8 +106,60 @@ $acting = ($calls | ForEach-Object { $_.actingIdentity } | Sort-Object -Unique) 
 Write-Host "  [i]    本次使用的身份：$acting（只读链路应只见 服务只读身份）"
 Report ($missingInitiator.Count -eq 0) '身份标注完整（本人身份 / 服务只读身份 二选一）'
 
-# ⑥ 登出
-Write-Host "⑥ 登出"
+# ⑥（可选）C7 写链路：造一条预约 → 查我的预约 → 撤销 → 复查。净副作用为零。
+#    默认不跑（默认档是"零写入"）；演示前彩排第 6 幕时用 -IncludeWriteCheck 跑一次。
+if ($IncludeWriteCheck) {
+  Write-Host "⑥ C7 写链路自检（借 → 查 → 退 → 复查；结束时会撤销自己造的预约）"
+  $future = (Get-Date).ToUniversalTime().AddDays(20).ToString('yyyy-MM-dd')
+  $taskBody = @{
+    intentId  = 'borrow-classroom'
+    slot      = @{ start = "${future}T05:00:00Z"; end = "${future}T06:00:00Z" }
+    resources = @(@{ classroom = @{ classroomId = 5 } })
+  } | ConvertTo-Json -Depth 5
+  $borrow = Invoke-RestMethod -Method Post -Uri "$base/api/tasks" -ContentType 'application/json; charset=utf-8' -Body $taskBody -WebSession $session -TimeoutSec 10
+  $borrowSnap = $null
+  for ($i = 0; $i -lt 40; $i++) {
+    Start-Sleep -Milliseconds 500
+    $borrowSnap = (Invoke-RestMethod -Uri "$base/api/tasks/$($borrow.data.taskId)" -WebSession $session -TimeoutSec 5).data
+    if ($borrowSnap.status -eq 'terminal') { break }
+  }
+  Report ($borrowSnap.result.terminal -eq 'DONE') "借教室 → $($borrowSnap.result.terminal)（$($borrowSnap.result.conclusion)）"
+
+  # 查我的预约（C7 查）：不传 slot 也能办——这是"目标不是教室"的意图
+  $queryBody = @{ intentId = 'query-my-reservations'; resources = @(@{ classroom = @{} }); slot = @{ start = "${future}T05:00:00Z"; end = "${future}T06:00:00Z" } } | ConvertTo-Json -Depth 5
+  $q = Invoke-RestMethod -Method Post -Uri "$base/api/tasks" -ContentType 'application/json; charset=utf-8' -Body $queryBody -WebSession $session -TimeoutSec 10
+  $qSnap = $null
+  for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Milliseconds 500
+    $qSnap = (Invoke-RestMethod -Uri "$base/api/tasks/$($q.data.taskId)" -WebSession $session -TimeoutSec 5).data
+    if ($qSnap.status -eq 'terminal') { break }
+  }
+  Report ($qSnap.result.terminal -eq 'DONE' -and $qSnap.result.conclusion -match '生效预约') "查我的预约 → $($qSnap.result.conclusion)"
+
+  # 退掉（C7 退）：唯一命中即直接撤销
+  $cancelBody = @{ intentId = 'cancel-my-reservation'; resources = @(@{ classroom = @{} }); slot = @{ start = "${future}T05:00:00Z"; end = "${future}T06:00:00Z" } } | ConvertTo-Json -Depth 5
+  $c = Invoke-RestMethod -Method Post -Uri "$base/api/tasks" -ContentType 'application/json; charset=utf-8' -Body $cancelBody -WebSession $session -TimeoutSec 10
+  $cSnap = $null
+  for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Milliseconds 500
+    $cSnap = (Invoke-RestMethod -Uri "$base/api/tasks/$($c.data.taskId)" -WebSession $session -TimeoutSec 5).data
+    if ($cSnap.status -eq 'terminal') { break }
+  }
+  Report ($cSnap.result.terminal -eq 'DONE') "撤销我的预约 → $($cSnap.result.terminal)（$($cSnap.result.conclusion)）"
+
+  # 复查：应已无生效预约（净副作用为零）
+  $again = Invoke-RestMethod -Method Post -Uri "$base/api/tasks" -ContentType 'application/json; charset=utf-8' -Body $queryBody -WebSession $session -TimeoutSec 10
+  $againSnap = $null
+  for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Milliseconds 500
+    $againSnap = (Invoke-RestMethod -Uri "$base/api/tasks/$($again.data.taskId)" -WebSession $session -TimeoutSec 5).data
+    if ($againSnap.status -eq 'terminal') { break }
+  }
+  Report ($againSnap.result.conclusion -match '没有生效中的预约|没有匹配') "复查：$($againSnap.result.conclusion)"
+}
+
+# ⑦ 登出
+Write-Host "⑦ 登出"
 Invoke-RestMethod -Method Post -Uri "$base/api/auth/logout" -WebSession $session -TimeoutSec 10 | Out-Null
 $afterStatus = 0
 try {

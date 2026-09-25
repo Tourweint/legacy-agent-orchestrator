@@ -38,7 +38,11 @@ export class JudgmentEngine {
   async collectFacts({ intentId, target, identity, precollectedFacts = {} } = {}) {
     const intent = this.store.getIntent(intentId)
     const propDefs = (intent.propositions ?? []).map((id) => this.store.getProposition(id))
-    if (!target?.slot?.start || !target?.slot?.end) {
+    // 时段是"教室型"事实的前提；目标不是教室的意图（如"我订了哪些教室"）本来就没有时段，
+    // 不该被这道闸门拦住——真正需要时段的事实各自会判"不适用"。
+    const SLOT_DEPENDENT_FACTS = ['F3', 'F4']
+    if ((intent.facts ?? []).some((f) => SLOT_DEPENDENT_FACTS.includes(f))
+      && (!target?.slot?.start || !target?.slot?.end)) {
       throw new JudgmentError('缺少申请时段（target.slot.start/end，绝对时刻）')
     }
 
@@ -51,6 +55,10 @@ export class JudgmentEngine {
         }
         needed.add(fact)
       }
+    }
+    // 没有命题的只读意图：事实本身就是它的产出（"我订了哪些教室"要的就是 F5），按计划声明收集
+    if (propDefs.length === 0) {
+      for (const fact of intent.facts ?? []) needed.add(fact)
     }
 
     // Q1 写入者匹配需要发起身份的数字 id（token 背后的 userId）；拿不到时
@@ -101,8 +109,11 @@ export class JudgmentEngine {
 
   #buildContext({ facts, target, identity }) {
     const f1 = facts.F1
-    // 目标教室三元组以 F1 的解析结果为准（人读名 → 系统标识），输入值兜底供话术引用
+    // 目标教室三元组以 F1 的解析结果为准（人读名 → 系统标识），输入值兜底供话术引用。
+    // 其余字段原样保留——记录型意图（C7）的目标记录编号 recordId 就挂在这里，
+    // 早先只保留三元组的写法会把它丢掉，导致"只能撤自己的"这类命题无法求值。
     const classroom = {
+      ...(target.classroom ?? {}),
       classroomId: f1?.value?.classroomId ?? target.classroom?.classroomId ?? null,
       building: f1?.value?.building ?? target.classroom?.building ?? null,
       roomNumber: f1?.value?.roomNumber ?? target.classroom?.roomNumber ?? null,

@@ -83,7 +83,13 @@ test('闸门二：置信度不达标 → clarify 并列出候选意图（E5）',
   const result = await engine.understand({ text: '帮我弄一下教室' })
   assert.equal(result.status, 'clarify')
   assert.equal(result.reason, 'low-confidence')
-  assert.deepEqual(result.candidates.map((c) => c.id).sort(), ['borrow-classroom', 'query-classroom-availability'])
+  // 候选来自意图计划闭集（C7 上线后为 4 条：借教室 / 查可用性 / 查我的预约 / 撤我的预约）
+  assert.deepEqual(result.candidates.map((c) => c.id).sort(), [
+    'borrow-classroom',
+    'cancel-my-reservation',
+    'query-classroom-availability',
+    'query-my-reservations',
+  ])
 })
 
 test('验收②：提示词零接口信息，且意图清单从计划生成', () => {
@@ -156,10 +162,15 @@ function makeChatRunner(world, llmResponses) {
       case '/classrooms/5/reserved_seats':
         return ok([])
       case '/admin/reservations': return ok(world.adminRows ?? [])
-      case '/reservations': return ok([])
+      case '/reservations': return ok(world.mineRows ?? []) // F5 我的预约（C7 用例在这里造数据）
       case '/admin/maintenance': return ok([])
       case '/reservations/classrooms': return world.create ?? ok(120)
-      default: return ok(null)
+      default:
+        // C7 撤销：DELETE /reservations/{id}
+        if (req.method === 'DELETE' && /^\/reservations\/\d+$/.test(req.path)) {
+          return world.cancel ?? ok(null)
+        }
+        return ok(null)
     }
   })
   const judgment = new JudgmentEngine({ configStore: gateway.store, gateway, evidenceChain: chain })
@@ -275,5 +286,81 @@ test('闸门三机械算缺：模型漏报 missing 也不影响（缺口由计�
   const outcome = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: sessionIdentity('TEACHER') })
   assert.ok(outcome.suspended)
   assert.deepEqual(outcome.clarify.missing, ['timeSegment']) // 闸门三：机械计算的缺口
-  void UIDS
+})
+
+// ---- C7 管理我的预约（2026-09-26 新增：查 / 退）--------------------------------
+
+// F5 的 wire 行（适配器归一化后 recordId/start/end/resourceName 与 admin 列表同形）
+const mineRow = (over = {}) => ({
+  id: 121,
+  userId: UIDS['233'],
+  username: '233',
+  resourceType: 'CLASSROOM',
+  resourceId: 5,
+  resourceName: '数智楼 123',
+  startTime: '2026-09-30T05:00:00',
+  endTime: '2026-09-30T06:00:00',
+  status: 'ACTIVE',
+  ...over,
+})
+
+const chat = (world, llmResponses, text) => {
+  const harness = makeChatRunner(world, llmResponses)
+  return harness.runner
+    .executeChatTask({ text, identity: sessionIdentity('TEACHER') })
+    .then((outcome) => ({ ...harness, outcome }))
+}
+
+test('C7 查：一句话列出名下生效预约——只读、零写调用、不过实体消解', async () => {
+  const { outcome, gateway } = await chat(
+    { mineRows: [mineRow(), mineRow({ id: 122, resourceId: 4, resourceName: '数智楼 222' })] },
+    [{ intent: 'query-my-reservations', slots: {}, confidence: 0.9, outOfDomain: false }],
+    '我订了哪些教室',
+  )
+  assert.ok(!outcome.suspended)
+  assert.equal(outcome.result.terminal, 'DONE')
+  assert.match(outcome.result.conclusion, /数智楼 123/)
+  assert.match(outcome.result.conclusion, /数智楼 222/)
+  // 只读：一次写调用都没有；也没有去解析教室名（不需要实体消解）
+  assert.equal(gateway.transport.callsTo('/reservations/classrooms').length, 0)
+  assert.equal(gateway.transport.callsTo('/classrooms/5').length, 0)
+})
+
+test('C7 退：唯一命中 → 真实撤销一次 → DONE（撤销是目的，不进补偿清单）', async () => {
+  const { outcome, gateway } = await chat(
+    { mineRows: [mineRow()] },
+    [{ intent: 'cancel-my-reservation', slots: { classroomName: '数智楼123' }, confidence: 0.9, outOfDomain: false }],
+    '把数智楼123那间退了',
+  )
+  assert.ok(!outcome.suspended)
+  assert.equal(outcome.result.terminal, 'DONE')
+  assert.match(outcome.result.conclusion, /已为您撤销/)
+  const cancels = gateway.transport.calls.filter((c) => c.method === 'DELETE' && /^\/reservations\/\d+$/.test(c.path))
+  assert.equal(cancels.length, 1, '只撤销一次')
+  assert.match(cancels[0].path, /\/reservations\/121$/)
+  assert.equal(outcome.result.compensations.length, 0, '撤销即目的，不留补偿条目')
+})
+
+test('C7 退：多命中 → 有依据拒绝并列出候选（绝不猜是哪一条），零写调用', async () => {
+  const { outcome, gateway } = await chat(
+    { mineRows: [mineRow(), mineRow({ id: 122, resourceId: 4, resourceName: '数智楼 222' })] },
+    [{ intent: 'cancel-my-reservation', slots: {}, confidence: 0.9, outOfDomain: false }],
+    '把我的预约退了',
+  )
+  assert.equal(outcome.result.terminal, 'REJECTED')
+  assert.match(outcome.result.conclusion, /数智楼 123/)
+  assert.match(outcome.result.conclusion, /请指明/)
+  assert.equal(gateway.transport.calls.filter((c) => c.method === 'DELETE').length, 0)
+})
+
+test('C7 退：名下没有匹配 → 有依据拒绝（并说出当前有什么），零写调用', async () => {
+  const { outcome, gateway } = await chat(
+    { mineRows: [mineRow({ id: 122, resourceId: 4, resourceName: '数智楼 222' })] },
+    [{ intent: 'cancel-my-reservation', slots: { classroomName: '数智楼123' }, confidence: 0.9, outOfDomain: false }],
+    '退了数智楼123那间',
+  )
+  assert.equal(outcome.result.terminal, 'REJECTED')
+  assert.match(outcome.result.conclusion, /没有匹配/)
+  assert.match(outcome.result.conclusion, /数智楼 222/)
+  assert.equal(gateway.transport.calls.filter((c) => c.method === 'DELETE').length, 0)
 })

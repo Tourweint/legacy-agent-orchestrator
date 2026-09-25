@@ -94,3 +94,62 @@ intents:
     verification: null
     compensation: null
     degrade: null                 # 查询无降级：被占/检修都如实答复，不"换一间替你问"
+
+  # ── C7 查：我订了哪些教室 ─────────────────────────────────────────────────
+  # 目标**不是教室**而是"我自己的记录"：因此声明 requiresEntityResolution: false——
+  # 引擎跳过"教室名 → 教室 id"那一步（否则会拿空教室名去解析，必然解析失败）。
+  - id: query-my-reservations
+    name: 查询我的预约
+    readOnly: true                # 只读：不进入提交，直接给结论
+    multiResource: false
+    requiresEntityResolution: false
+    slots:
+      required: []                # 什么都不必说："我订了哪些教室"就能办
+      optional: [classroomName, datePhrase, timeSegment]   # 说了就用来过滤
+      slotHints:
+        classroomName: 教室名（可选，如"数智楼123"——只看这一间）
+        datePhrase: 日期说法（可选，如"周三"——不要换算成日期）
+        timeSegment: 时段说法（可选，如"下午"）
+    facts: [F5]
+    propositions: []              # 没有"能不能办"的判定——它只是把事实说给用户听
+    readOnlyAnswer:
+      fromFact: F5                # 答案由"我的预约"这条事实生成（不是拼命题结论）
+    steps:
+      - { step: my-reservations, interface: edu.reservation.mine, serves: "F5（登录者本人的 ACTIVE 记录）" }
+    resolution: { kind: none }    # 只读列举：没有"要操作的那一条"可定位，直接进事实收集
+    verification: null
+    compensation: null
+    degrade: null
+
+  # ── C7 退：把周三那间退了 ─────────────────────────────────────────────────
+  # 撤销是**用户的目的**，不是副作用：所以 compensation 为 null（撤销失败就是失败，
+  # 不做"重新订回来"）。唯一要守的规矩是"只能撤自己的"——由命题 P-IS-MINE 守。
+  - id: cancel-my-reservation
+    name: 撤销我的预约
+    readOnly: false
+    multiResource: false
+    requiresEntityResolution: false
+    slots:
+      required: []
+      optional: [classroomName, datePhrase, timeSegment]
+      slotHints:
+        classroomName: 教室名（可选，如"数智楼123"——用来在您的预约里定位是哪一条）
+        datePhrase: 日期说法（可选，如"周三"）
+        timeSegment: 时段说法（可选，如"下午"）
+    facts: [F5]
+    propositions: [P-IS-MINE]
+    steps:
+      - { step: my-reservations,    interface: edu.reservation.mine,   serves: "F5（先知道有哪些，才谈得上撤哪条）" }
+      - { step: cancel-reservation, interface: edu.reservation.cancel, serves: 提交, role: submit,
+          params: { recordId: "target.recordId" } }   # 参数按计划声明组装（撤销要的是记录编号，不是教室+时段）
+    verification:
+      primary:  { interface: logi.reservation.list, identity: ADMIN }
+      fallback: { interface: edu.reservation.mine,  identity: initiator }
+      byRecord: true              # 撤销语境的查证一律按 recordId 定位（第 06 章 §8.1）
+      predicate:
+        forward:    "按 recordId 定位：查无此 id 或状态非 ACTIVE = 撤销已生效（第 06 章 §8.1）"
+        compensate: "同上——撤销即目的，不存在二次补偿"
+    compensation: null            # 撤销是目的而非副作用（能力清单 C7）
+    successMessage: 已为您撤销，该预约不再生效
+    resolution: { kind: my-reservation }
+    degrade: null

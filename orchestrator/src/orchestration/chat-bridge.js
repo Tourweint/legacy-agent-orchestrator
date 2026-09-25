@@ -116,6 +116,21 @@ export class ChatBridge {
       return
     }
 
+    // C7：目标不是教室的意图（"我订了哪些教室"/"把周三那间退了"）不做教室名与时段归一化。
+    // 理由：这类意图的目标是"我自己的记录"，说教室/日期只是**可选的定位提示**——
+    // 强制归一化会把"什么都不用说也能办"变成"必须说清楚才行"。
+    const targetless = !(intent.slots?.required ?? []).some((s) =>
+      ['classroomName', 'datePhrase', 'timeSegment'].includes(s),
+    )
+    if (targetless) {
+      taskContext.chat.resources = [{ classroom: {} }]
+      taskContext.slot = null
+      taskContext.currentTarget = {}
+      // 已识别到的原话槽位留在 taskContext.slots，供记录定位（run-engine #filterMyReservations）使用
+      machine.fire('INTENT_RESOLVED', { payload: intent.id })
+      return
+    }
+
     // 归一化试算（规则集外 → 追问；可行域违反 → 追问；两者都不猜）
     let normalized
     try {

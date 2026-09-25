@@ -22,11 +22,12 @@ function makeTmpStore(mutate) {
   }
 }
 
-test('装载全部配置：14 条接口、2 个意图、3 个身份、15 个状态', () => {
+test('装载全部配置：14 条接口、4 个意图、3 个身份、15 个状态', () => {
   const store = new ConfigStore(CONFIG_DIR)
   // 12 → 14：新增 auth.refresh / auth.logout（登录会话续期与登出，登录方案决定 6）
   assert.equal(store.allInterfaces.length, 14)
-  assert.equal(store.intentList.length, 2)
+  // 2 → 4：C7 上线（查询我的预约 / 撤销我的预约）
+  assert.equal(store.intentList.length, 4)
   assert.equal(store.identityList.length, 3)
   assert.equal(Object.keys(store.getStateMachine().states).length, 15)
 })

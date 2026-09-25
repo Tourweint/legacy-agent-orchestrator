@@ -9,7 +9,8 @@
 import { OrchestrationError } from './orchestration-error.js'
 import { isTerminal } from './state-machine.js'
 import { normalizeSpace } from '../judgment/predicates.js'
-import { describeRange } from '../canonical/time.js'
+import { describeRange, resolveRelativeRange } from '../canonical/time.js'
+import { parseClassroomName } from '../canonical/classroom-name.js'
 
 function machineGuard(taskContext) {
   if (!taskContext.machine) throw new OrchestrationError('taskContext.machine 未初始化（由 TaskRunner 注入）')
@@ -85,6 +86,16 @@ export class RunEngine {
 
   // ── 实体消解（RESOLVING）：人读名 → 系统标识。列表查询走意图计划声明的候选来源接口 ──
   async #doResolving({ machine, resource, taskContext }) {
+    // ── C7 及同类"目标不是教室"的意图：计划声明 requiresEntityResolution:false 时跳过实体消解 ──
+    // 这类意图的目标是"我自己的记录"（我的预约 / 我的候补），拿空教室名去解析必然失败。
+    if (taskContext.intent.requiresEntityResolution === false) {
+      if (taskContext.intent.resolution?.kind === 'my-reservation') {
+        const handled = await this.#locateMyReservation({ machine, taskContext })
+        if (handled) return
+      }
+      machine.fire('ENTITY_RESOLVED', { payload: null }) // 没有教室要解析，直接进入事实收集
+      return
+    }
     // 目标来自任务上下文：结构化运行由队列播种，聊天运行由桥在归一化后播种
     const classroom = taskContext.currentTarget ?? {}
     if (classroom.classroomId != null) {
@@ -172,8 +183,17 @@ export class RunEngine {
 
     // 只读意图：判定给出答案即完成（含"被占/检修"的如实答复），CHECK_ONLY → DONE
     if (taskContext.intent.readOnly) {
-      const answer = this.#queryAnswer(judgment)
-      decide('CHECK_ONLY', [...s.satisfied, ...s.violated.map((v) => v.id), ...s.unconfirmable.map((u) => u.id)], answer)
+      const answer = this.#readOnlyAnswer(taskContext, judgment)
+      const ids = [...s.satisfied, ...s.violated.map((v) => v.id), ...s.unconfirmable.map((u) => u.id)]
+      // 依据必须非空（证据链硬约束）：无命题的只读意图（如"我订了哪些教室"）以它依赖的事实为依据
+      const basis = ids.length > 0 ? ids.map((id) => ({ proposition: id })) : [{ fact: taskContext.intent.readOnlyAnswer?.fromFact ?? 'F5' }]
+      this.#decide(taskContext, {
+        phase: 'P2',
+        action: 'decide:CHECK_ONLY',
+        input: { ids },
+        basis,
+        conclusion: { outcome: 'CHECK_ONLY', summary: answer },
+      })
       taskContext.outcome = { message: answer }
       machine.fire('CHECK_ONLY')
       return
@@ -221,15 +241,31 @@ export class RunEngine {
     if (machine.purpose === 'forward') {
       const submitStep = (taskContext.intent.steps ?? []).find((s) => s.role === 'submit')
       if (!submitStep) throw new OrchestrationError(`意图 ${taskContext.intentId} 缺少 role=submit 的步骤`)
-      const r = await this.gateway.call(submitStep.interface, {
-        classroomId: taskContext.currentTarget.classroomId,
-        start: taskContext.slot.start,
-        end: taskContext.slot.end,
-        ...(taskContext.reason ? { reason: taskContext.reason } : {}),
-      }, { phase: 'P3' })
+      // 提交参数：计划声明了 params 就按声明组装（撤销要的是记录编号），否则按"教室+时段"老口径
+      const submitParams = submitStep.params
+        ? this.#buildStepParams(submitStep.params, taskContext)
+        : {
+            classroomId: taskContext.currentTarget.classroomId,
+            start: taskContext.slot.start,
+            end: taskContext.slot.end,
+            ...(taskContext.reason ? { reason: taskContext.reason } : {}),
+          }
+      const r = await this.gateway.call(submitStep.interface, submitParams, { phase: 'P3' })
       taskContext.lastCall = r
       if (r.verdict === 'SUCCESS') {
-        const recordId = r.data?.recordId ?? null
+        const recordId = r.data?.recordId ?? (submitStep.params ? taskContext.currentTarget?.recordId ?? null : null)
+        // 撤销类意图（compensation: null）不往补偿清单里塞东西：撤销是目的，不是需要回滚的副作用
+        if (!taskContext.intent.compensation) {
+          taskContext.lastEffect = {
+            recordId,
+            label: taskContext.currentTarget?.resourceName ?? taskContext.intent.name ?? '',
+            slotText: taskContext.slot
+              ? describeRange(taskContext.slot.start, taskContext.slot.end, this.store.getConstants().time)
+              : '',
+          }
+          machine.fire('CALL_SUCCESS', { payload: recordId })
+          return
+        }
         taskContext.compensations.push({
           recordId,
           interfaceId: submitStep.interface,
@@ -263,7 +299,11 @@ export class RunEngine {
     if (machine.purpose === 'forward') {
       if (r.verdict === 'SUCCESS') {
         const item = taskContext.compensations[taskContext.compensations.length - 1]
-        taskContext.outcome = { message: `已为您办妥：${item?.label ?? ''}（预约 #${item?.recordId}，${item?.slotText ?? ''}）${taskContext.outcome?.exempt?.length ? '（未能确认是否重复）' : ''}`, recordId: item?.recordId }
+        // 撤销类意图：没有补偿条目，话术按"已撤销"给（不是"已办妥新预约"）
+        const message = item
+          ? `已为您办妥：${item.label ?? ''}（预约 #${item.recordId}，${item.slotText ?? ''}）${taskContext.outcome?.exempt?.length ? '（未能确认是否重复）' : ''}`
+          : `${taskContext.intent.successMessage ?? '已为您处理'}（记录 #${taskContext.lastEffect?.recordId ?? '—'}）。`
+        taskContext.outcome = { message, recordId: item?.recordId ?? taskContext.lastEffect?.recordId }
         machine.fire('JUDGE_SUCCESS')
       } else {
         taskContext.outcome = { message: `提交未成功（${r.reasonCode}），未产生副作用。` }
@@ -290,6 +330,29 @@ export class RunEngine {
         return
       }
       taskContext.counters.forwardVerify += 1
+      // 撤销语境（计划声明 byRecord）：查证一律按 recordId 定位（第 06 章 §8.1）——
+      // 撤销后本来就"没有时段可重叠"，按重叠比对既错又危险。
+      if (taskContext.intent.verification?.byRecord === true) {
+        const targetRecordId = taskContext.currentTarget?.recordId ?? taskContext.lastEffect?.recordId ?? null
+        const v = await this.verifier.verifyCompensate({ intent: taskContext.intent, recordId: targetRecordId })
+        this.#decide(taskContext, {
+          phase: 'P4',
+          action: 'decide:verify-cancellation',
+          input: { attempt: taskContext.counters.forwardVerify, recordId: targetRecordId },
+          basis: v.basis ?? [{ fact: 'F4' }],
+          conclusion: { outcome: v.outcome, summary: v.summary },
+        })
+        if (v.outcome === 'FOUND') {
+          taskContext.outcome = { message: `已为您撤销：记录 #${targetRecordId} 已不再生效。`, recordId: targetRecordId }
+          machine.fire('VERIFY_FOUND', { payload: 'mine' }) // forward + mine → DONE（撤销即目的）
+        } else if (v.outcome === 'NOT_FOUND') {
+          machine.fire('VERIFY_NOT_FOUND', { payload: { attempt: taskContext.counters.forwardVerify } })
+        } else {
+          taskContext.outcome = { message: `撤销结果未能确认：${v.summary}。需人工核实。` }
+          machine.fire('VERIFY_INCONCLUSIVE')
+        }
+        return
+      }
       const v = await this.verifier.verifyForward({
         intent: taskContext.intent,
         target: { classroom: taskContext.currentTarget, slot: taskContext.slot },
@@ -412,6 +475,110 @@ export class RunEngine {
       conclusion: { outcome: 'COMPENSATION_READY', summary: `回滚已生效副作用：预约 #${pending[0].recordId}（${pending[0].label}）` },
     })
     machine.fire('COMPENSATION_READY', { payload: taskContext.currentCompensation.recordId })
+  }
+
+  // ── C7 支持：记录级目标（"我的预约"）──────────────────────────────────────
+
+  /**
+   * 从"我的预约"里定位本次要操作的那条记录（计划声明 resolution.kind = my-reservation）。
+   * 写入意图必须**唯一命中**：0 条 / 多条都给出有依据的话术（多命中列出候选让用户挑），
+   * 绝不猜（I3：不确定必须收敛成确定，"猜一条"就是制造不确定）。
+   * @returns {boolean} true = 已推进或已落终态，调用方直接 return
+   */
+  async #locateMyReservation({ machine, taskContext }) {
+    const r = await this.gateway.call('edu.reservation.mine', {}, { phase: 'P2' })
+    if (r.verdict !== 'SUCCESS') {
+      taskContext.outcome = { message: '暂时查不到您的预约记录，请稍后再试。' }
+      machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'mine-unavailable' } })
+      return true
+    }
+    const hints = taskContext.slots ?? {}
+    const matched = this.#filterMyReservations(r.data ?? [], hints)
+    taskContext.locatedRecords = matched
+    if (matched.length === 0) {
+      const all = (r.data ?? []).filter((row) => row.status === 'ACTIVE')
+      taskContext.outcome = {
+        message:
+          all.length === 0
+            ? '您名下当前没有生效中的预约，无需撤销。'
+            : `您名下没有匹配「${this.#hintText(hints)}」的预约。当前生效的预约：${this.#recordList(all)}。`,
+        candidates: all,
+      }
+      machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'no-match' } })
+      return true
+    }
+    if (matched.length > 1) {
+      taskContext.outcome = {
+        message: `您名下有 ${matched.length} 条匹配的预约：${this.#recordList(matched)}。请指明是哪一条（例如"退掉数智楼123那间"）。`,
+        candidates: matched,
+      }
+      machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'ambiguous' } })
+      return true
+    }
+    const row = matched[0]
+    taskContext.currentTarget = { ...(taskContext.currentTarget ?? {}), ...row }
+    machine.fire('ENTITY_RESOLVED', { payload: row.recordId })
+    return true
+  }
+
+  /** 用可选的提示词（教室名 / 日期说法 / 时段说法）过滤本人记录；说法规则外时退化为不过滤。 */
+  #filterMyReservations(rows, hints) {
+    let out = rows.filter((row) => row.status === 'ACTIVE')
+    const rooms = hints.classroomName ? parseClassroomName(hints.classroomName) : []
+    if (rooms.length > 0) {
+      out = out.filter((row) => rooms.some((room) => String(row.resourceName ?? '').includes(room.roomNumber)))
+    }
+    if (hints.datePhrase || hints.timeSegment) {
+      try {
+        const range = resolveRelativeRange(
+          { datePhrase: hints.datePhrase, segmentName: hints.timeSegment },
+          new Date(),
+          this.store.getConstants().time,
+        )
+        out = out.filter((row) => row.start < range.end && row.end > range.start)
+      } catch {
+        // 规则外表达：不猜，也不因此丢掉候选——退化为不过滤，由候选列表让用户挑
+      }
+    }
+    return out
+  }
+
+  #recordList(rows) {
+    const time = this.store.getConstants().time
+    return rows
+      .map((row) => `${row.resourceName ?? `资源 ${row.resourceId}`}（${describeRange(row.start, row.end, time)}）`)
+      .join('；')
+  }
+
+  #hintText(hints) {
+    return [hints.classroomName, hints.datePhrase, hints.timeSegment].filter(Boolean).join(' ') || '该条件'
+  }
+
+  /** 提交参数按计划声明组装：值用点路径从任务上下文取（如 target.recordId）。 */
+  #buildStepParams(template, taskContext) {
+    const scope = {
+      target: taskContext.currentTarget ?? {},
+      slot: taskContext.slot ?? {},
+      record: { id: taskContext.currentTarget?.recordId ?? null },
+    }
+    const out = {}
+    for (const [key, expr] of Object.entries(template)) {
+      out[key] = String(expr).split('.').reduce((acc, part) => (acc == null ? undefined : acc[part]), scope)
+    }
+    return out
+  }
+
+  /** 只读意图的答案：声明了 readOnlyAnswer.fromFact 就由该事实生成，否则沿用命题结论拼装。 */
+  #readOnlyAnswer(taskContext, judgment) {
+    const fromFact = taskContext.intent.readOnlyAnswer?.fromFact
+    if (!fromFact) return this.#queryAnswer(judgment)
+    const fact = taskContext.facts?.[fromFact]
+    if (fact?.state !== 'obtained') {
+      return `暂时查不到您的预约记录（${fact?.note ?? '查询未成功'}），请稍后再试。`
+    }
+    const mine = (fact.value ?? []).filter((row) => row.status === 'ACTIVE')
+    if (mine.length === 0) return '您名下当前没有生效中的预约。'
+    return `您名下当前有 ${mine.length} 条生效预约：${this.#recordList(mine)}。`
   }
 
   // ── 私有工具 ──────────────────────────────────────────────────────────────

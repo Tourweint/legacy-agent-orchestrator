@@ -72,7 +72,14 @@ export class TaskRunner {
    */
   async executeTask({ intentId, resources, slot, reason, identity }) {
     const intent = this.store.getIntent(intentId)
-    if (!Array.isArray(resources) || resources.length === 0) {
+    // 目标不是教室的意图（C7）：不需要调用方给资源目标，引擎自己从"我的预约"里定位那一条记录
+    const targetless = intent.requiresEntityResolution === false
+    const queue = Array.isArray(resources) && resources.length > 0
+      ? resources
+      : targetless
+        ? [{ classroom: {} }]
+        : null
+    if (!queue) {
       throw new OrchestrationError('任务缺少资源列表')
     }
     // 越权拒绝发生在任何调用之前（决定 5）：结构化入口在 IDLE 态直接落 REJECTED，不发任何请求
@@ -84,7 +91,7 @@ export class TaskRunner {
     const { result } = await this.#driveQueue({
       stack,
       identity,
-      queue: resources.map((r) => ({ classroom: r.classroom, reason: r.reason ?? reason })),
+      queue: queue.map((r) => ({ classroom: r.classroom ?? {}, reason: r.reason ?? reason })),
       slot,
       reason,
       startStateForFirst: 'IDLE',

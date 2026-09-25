@@ -22,6 +22,17 @@
 
 propositions:
 
+  # ── C7：管理我的预约（本次新增；只依赖既有事实 F5，采集与算子均为数据）──────
+  - id: P-IS-MINE
+    semantics: 目标记录确实属于本人且仍生效——撤销别人的记录必须在这里被挡住
+    dependsOn: [F5]
+    skipWhen: {op: record-unknown}          # 目标记录没定位到时本命题无意义（由定位步给话术）
+    when: {op: record-in-mine, fact: F5}
+    violatedMessage: >-
+      这条预约（#{{target.recordId}}）不在您名下或已不生效，我不能替您撤销。
+    degradable: false
+    invariants: [I2, I5]
+
   # ── 主链路 ────────────────────────────────────────────────────────────────
   - id: P-CLASSROOM-EXISTS
     semantics: 教室存在——人读标识能解析到系统 id
