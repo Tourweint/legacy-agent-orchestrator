@@ -9,6 +9,8 @@ const store = useTaskStore()
 const collapsed = ref({ P1: false, P2: false, P3: false, P4: false, P5: true, P6: true })
 
 const hasTask = computed(() => store.taskId !== null)
+// 终态才显示结果卡（此前模板里写的是未定义的 `terminal`，导致结果卡永远不渲染）
+const isTerminal = computed(() => store.taskStatus === 'terminal')
 
 function toggle(key) {
   collapsed.value[key] = !collapsed.value[key]
@@ -26,7 +28,7 @@ function phaseName(key) {
       <div v-if="store.taskId" class="mono muted task-id">{{ store.taskId }}</div>
     </div>
 
-    <div v-if="terminal" >
+    <div v-if="isTerminal">
       <ResultCard />
     </div>
 

@@ -39,7 +39,7 @@ const transport = new HttpTransport({
 const adapters = new ProtocolAdapters({ configStore: store })
 const identityPool = new IdentityPool({ configStore: store, transport, adapters, constants })
 
-const { server } = createAccessServer({ configStore: store, transport, identityPool: pool, adapters })
+const { server } = createAccessServer({ configStore: store, transport, identityPool, adapters })
 server.listen(port, () => {
   console.log(`[orchestrator] 编排引擎已启动 → http://localhost:${port}`)
   console.log(`[orchestrator] 存量系统：${baseUrl}`)
