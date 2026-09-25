@@ -1,11 +1,33 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { useTaskStore } from '../stores/task.js'
+import { useSessionStore } from '../stores/session.js'
 import DebugTaskPanel from './DebugTaskPanel.vue'
 
 const store = useTaskStore()
+const session = useSessionStore()
 const draft = ref('')
 const listEl = ref(null)
+
+// 能力入口（示例话术）：一点即发。为什么要有它——评委不该为了看"能干什么"自己先想句子；
+// 每条话术都是**当前角色真的能办成**的事（不是宣传语），按角色只显示办得到的那些。
+const TEACHER_EXAMPLES = [
+  '帮我借下周三下午数智楼123',
+  '查一下明天上午数智楼123有没有空',
+  '我订了哪些教室',
+  '把数智楼123那间退了',
+]
+const STUDENT_EXAMPLES = [
+  '查一下明天上午数智楼123有没有空',
+  '我订了哪些教室',
+]
+const examples = computed(() => (session.role === 'STUDENT' ? STUDENT_EXAMPLES : TEACHER_EXAMPLES))
+
+function useExample(text) {
+  if (pending.value || terminal.value) return
+  draft.value = text
+  send()
+}
 
 // 对话视图的助手侧消息全部由事件派生（§6.1：不自行推断）
 const assistantMessages = computed(() =>
@@ -84,6 +106,16 @@ watch(assistantMessages, scrollBottom)
     </div>
 
     <div v-if="store.error" class="error">{{ store.error }}</div>
+
+    <!-- 能力入口：说一句就能办（当前角色办得到的那些） -->
+    <div v-if="!terminal && !suspended" class="capability">
+      <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
+      <div class="chips">
+        <button v-for="text in examples" :key="text" class="chip" :disabled="pending" @click="useExample(text)">
+          {{ text }}
+        </button>
+      </div>
+    </div>
 
     <div class="composer">
       <input
@@ -192,6 +224,42 @@ watch(assistantMessages, scrollBottom)
   color: var(--status-danger);
   font-size: 12px;
   margin-bottom: var(--space-2);
+}
+
+.capability {
+  margin-bottom: var(--space-3);
+}
+
+.capability-label {
+  font-size: 11px;
+  margin-bottom: var(--space-2);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border: var(--border-width) solid transparent;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) ease;
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .composer {
