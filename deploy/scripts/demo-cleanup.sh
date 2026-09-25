@@ -1,49 +1,66 @@
 #!/usr/bin/env bash
-# 演示副作用清理 —— 幕间运行；撤销演示产生的 ACTIVE 预约（走业务接口，不插库）。
-# 维护窗口按幕 3 需求由 demo-prepare.sh 创建；如需撤销窗口，用 ADMIN 接口的删除端点或直接复位。
+# 演示副作用清理 —— 幕间/演示后运行；把演示造出来的东西撤回去（走业务接口，不插库）。
 #
-# 用法：ORCH_LEGACY_TEACHER_PASSWORD=233 ORCH_LEGACY_STUDENT_PASSWORD=abc bash deploy/scripts/demo-cleanup.sh
+# 三审 §九 3.1 的"复位"要求：每幕录完立即清理，把该幕产生的副作用清回干净基线
+# （ACTIVE=0、无遗留维修窗口）。本脚本按顺序做三件事：
+#   ① 撤销所有 ACTIVE 预约（用**记录所有者的身份**撤——撤销接口只认本人）
+#   ② 取消所有生效中的维修窗口（ADMIN）
+#   ③ 复核：ACTIVE 预约与生效窗口都应为 0
+#
+# 用法：bash deploy/scripts/demo-cleanup.sh
+# 凭证：优先环境变量；未设时回落 start-all.bat 的演示默认值（见 lib/legacy-credentials.sh）。
+#
+# 说明（2026-09-26 修复）：旧版取列表时**没带令牌**（401 → 空列表 → 什么都没清），
+# 且依赖 PATH 里的 node 解析 JSON。现改为带 ADMIN 令牌 + sed/grep 解析，不依赖 node。
 
 set -eu
-LEGACY="${ORCH_LEGACY_BASE:-http://localhost:8080}"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/deploy/scripts/lib/legacy-credentials.sh"
+load_legacy_credentials "$ROOT"
+LEGACY="$ORCH_LEGACY_BASE"
 
-login() {
-  curl -s --max-time 5 "$LEGACY/auth/login" -X POST \
-    -H "Content-Type: application/json" -H "X-Device-Id: demo-cleanup" \
-    -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
-    | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{console.log(JSON.parse(d).data.accessToken)})"
+login_token() {
+  curl -s --max-time 5 "$LEGACY/auth/login" -X POST -H "Content-Type: application/json" \
+    -H "X-Device-Id: demo-cleanup" -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
+    | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p'
 }
 
-TEACHER_AUTH=$(login 233 "${ORCH_LEGACY_TEACHER_PASSWORD:?需要 ORCH_LEGACY_TEACHER_PASSWORD}")
-ADMIN_AUTH=$(login admin "${ORCH_LEGACY_ADMIN_PASSWORD:?需要 ORCH_LEGACY_ADMIN_PASSWORD}")
+TEACHER_AUTH=$(login_token 233 "$ORCH_LEGACY_TEACHER_PASSWORD")
+ADMIN_AUTH=$(login_token admin "$ORCH_LEGACY_ADMIN_PASSWORD")
+STUDENT_AUTH=$(login_token abc "$ORCH_LEGACY_STUDENT_PASSWORD")
 
-# 教师撤销自己名下的 ACTIVE 预约
-rows=$(curl -s --max-time 5 "$LEGACY/admin/reservations")
-echo "$rows" | node -e "
-let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
-  const j=JSON.parse(d)
-  for (const r of (j.data||[]).filter(r=>r.status==='ACTIVE')) console.log(r.id+'|'+r.userId)
-})" | while IFS='|' read -r id uid; do
-  echo "撤销 ACTIVE 预约 #$id"
-  curl -s --max-time 5 "$LEGACY/reservations/$id" -X DELETE \
-    -H "Authorization: Bearer $TEACHER_AUTH" | head -c 80; echo
+rows=$(curl -s --max-time 8 "$LEGACY/admin/reservations" -H "Authorization: Bearer $ADMIN_AUTH")
+
+# ① 撤销 ACTIVE 预约：按记录的归属账号选对应身份（撤销只认本人）
+echo "$rows" | tr '}' '\n' | grep '"status":"ACTIVE"' | while read -r row; do
+  id=$(echo "$row" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  owner=$(echo "$row" | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')
+  [ -n "$id" ] || continue
+  case "$owner" in
+    233) token="$TEACHER_AUTH" ;;
+    abc) token="$STUDENT_AUTH" ;;
+    *)   token="$ADMIN_AUTH" ;;   # 非演示账号（历史数据）：用管理身份尝试；撤不动就保留
+  esac
+  echo "撤销 ACTIVE 预约 #$id（归属 $owner）"
+  curl -s --max-time 5 "$LEGACY/reservations/$id" -X DELETE -H "Authorization: Bearer $token" | head -c 80; echo
 done
 
-# 撤销学生名下的 ACTIVE 预约（若演示中用到学生身份）
-if [ -n "${ORCH_LEGACY_STUDENT_PASSWORD:-}" ]; then
-  STUDENT_AUTH=$(login abc "$ORCH_LEGACY_STUDENT_PASSWORD")
-  echo "$rows" | node -e "
-let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
-  const j=JSON.parse(d)
-  for (const r of (j.data||[]).filter(r=>r.status==='ACTIVE'&&(r.username==='abc'))) console.log(r.id)
-})" | while read -r id; do
-    echo "撤销学生预约 #$id"
-    curl -s --max-time 5 "$LEGACY/reservations/$id" -X DELETE \
-      -H "Authorization: Bearer $STUDENT_AUTH" | head -c 80; echo
-  done
-fi
+# ② 取消生效中的维修窗口（幕 3 预置的窗口；ADMIN）
+windows=$(curl -s --max-time 8 "$LEGACY/admin/maintenance" -H "Authorization: Bearer $ADMIN_AUTH")
+echo "$windows" | tr '}' '\n' | grep '"status":"ACTIVE"' | while read -r row; do
+  id=$(echo "$row" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  [ -n "$id" ] || continue
+  echo "取消维修窗口 #$id"
+  curl -s --max-time 5 "$LEGACY/admin/maintenance/$id" -X DELETE -H "Authorization: Bearer $ADMIN_AUTH" | head -c 80; echo
+done
 
-# 复核
-after=$(curl -s --max-time 5 "$LEGACY/admin/reservations")
-left=$(echo "$after" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const j=JSON.parse(d);console.log((j.data||[]).filter(r=>r.status==='ACTIVE').length)})")
-echo "清理后 ACTIVE: $left（应为 0）"
+# ③ 复核
+after=$(curl -s --max-time 8 "$LEGACY/admin/reservations" -H "Authorization: Bearer $ADMIN_AUTH")
+left=$(echo "$after" | tr '}' '\n' | grep -c '"status":"ACTIVE"' || true)
+windows_after=$(curl -s --max-time 8 "$LEGACY/admin/maintenance" -H "Authorization: Bearer $ADMIN_AUTH")
+left_windows=$(echo "$windows_after" | tr '}' '\n' | grep -c '"status":"ACTIVE"' || true)
+echo "清理后 ACTIVE 预约: $left（应为 0）；生效中维修窗口: $left_windows（应为 0）"
+if [ "$left" != "0" ] || [ "$left_windows" != "0" ]; then
+  echo "⚠️ 仍有残留——按第 11 章 §七 排查表处理（残留会让断言与镜头不可复现）"
+  exit 1
+fi
