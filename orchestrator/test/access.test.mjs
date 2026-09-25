@@ -18,14 +18,20 @@ const wireRow = (over = {}) => ({
   status: 'ACTIVE', ...over,
 })
 
-// 起一个真实 HTTP 服务（随机端口）+ 假传输的存量系统世界
-async function startServer(world = {}) {
+// 起一个真实 HTTP 服务（随机端口）+ 假传输的存量系统世界；llmResponses 非空时用脚本化 LLM
+async function startServer(world = {}, llmResponses = null) {
   const store = new ConfigStore()
   let adminCalls = 0
   const { gateway, transport } = makeGateway((req) => {
     switch (req.path) {
       case '/classrooms/5': return ok({ id: 5, building: '数智楼', roomNumber: '123', capacity: 48, status: 'ENABLED' })
+      case '/classrooms/4': return ok({ id: 4, building: '数智楼', roomNumber: '222', capacity: 55, status: 'ENABLED' })
       case '/classrooms/5/reserved_seats': return ok([])
+      case '/classrooms/available_list':
+        return ok([
+          { id: 5, building: '数智楼', roomNumber: '123', capacity: 48, status: 'ENABLED' },
+          { id: 4, building: '数智楼', roomNumber: '222', capacity: 55, status: 'ENABLED' },
+        ])
       case '/admin/reservations': {
         adminCalls += 1
         if (world.adminSequence) return world.adminSequence[Math.min(adminCalls, world.adminSequence.length) - 1]
@@ -40,10 +46,20 @@ async function startServer(world = {}) {
   const pool = new IdentityPool({
     configStore: store, transport, adapters: gateway.adapters, constants: store.getConstants(),
   })
-  const { server, taskStore } = createAccessServer({ configStore: store, transport, identityPool: pool })
+  const llm = llmResponses
+    ? {
+        calls: [],
+        async complete({ messages }) {
+          llm.calls.push(messages)
+          const r = llmResponses[Math.min(llm.calls.length - 1, llmResponses.length - 1)]
+          return { text: JSON.stringify(r), model: 'fake-qwen', elapsedMs: 1 }
+        },
+      }
+    : undefined
+  const { server, taskStore } = createAccessServer({ configStore: store, transport, identityPool: pool, llm })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}`
-  return { base, server, taskStore, transport }
+  return { base, server, taskStore, transport, llm }
 }
 
 const postTask = async (base, body) =>
@@ -225,6 +241,44 @@ test('形状校验错误码：BAD_JSON / 缺意图 / 缺资源 / 缺身份 / 非
     const unknownTask = await getJson(base, '/api/tasks/T-NONE')
     assert.equal(unknownTask.httpStatus, 404)
     assert.equal(unknownTask.body.code, ERROR_CODES.TASK_NOT_FOUND)
+  } finally {
+    server.close()
+  }
+})
+
+test('自然语言入口：一句话 → 挂起追问 → 回复 → DONE（两条路径汇入同一编排）', async () => {
+  const llmResponses = [
+    { intent: 'borrow-classroom', slots: { classroomName: '数智楼222', datePhrase: '下周三' }, confidence: 0.9, outOfDomain: false },
+    { intent: 'borrow-classroom', slots: { classroomName: '数智楼222', datePhrase: '下周三', timeSegment: '下午' }, confidence: 0.9, outOfDomain: false },
+  ]
+  const { base, server } = await startServer({}, llmResponses)
+  try {
+    const post = await fetch(`${base}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '帮我借下周三下午数智楼222', identity: 'TEACHER' }),
+    })
+    assert.equal(post.status, 200)
+    const { data } = await post.json()
+
+    // 等待挂起（追问）
+    let snapshot
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) {
+      snapshot = (await getJson(base, `/api/tasks/${data.taskId}`)).body.data
+      if (snapshot.status !== 'running') break
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    assert.equal(snapshot.status, 'suspended')
+    assert.equal(snapshot.clarify.kind, 'missing-slots')
+    assert.deepEqual(snapshot.clarify.missing, ['timeSegment'])
+
+    // 回复 → 恢复 → 终态 DONE
+    await fetch(`${base}/api/tasks/${data.taskId}/reply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '下午' }),
+    })
+    const finalSnapshot = await awaitTerminal(base, data.taskId)
+    assert.equal(finalSnapshot.result.terminal, 'DONE')
   } finally {
     server.close()
   }

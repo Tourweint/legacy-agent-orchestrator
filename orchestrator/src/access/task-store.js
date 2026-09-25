@@ -9,11 +9,13 @@ export class TaskStore {
     this.tasks = new Map() // taskId → { taskId, status: 'running'|'terminal', result, entries(), createdAt }
   }
 
-  register({ taskId, chain, run }) {
+  register({ taskId, chain, run, stack, runner }) {
     const task = {
       taskId,
       status: 'running',
       result: null,
+      runner, // 恢复/取消操作经它进入编排层
+      stack: stack ?? null, // 聊天任务挂起/恢复所需的运行栈（机器 + 上下文 + 驱动器）
       run, // 运行 Promise（调用方可 await；服务器不 await——结果走事件流）
       createdAt: new Date().toISOString(),
       entries: () => chain.getEntries(),
@@ -32,6 +34,16 @@ export class TaskStore {
     if (!task) return null
     task.status = 'terminal'
     task.result = result
+    task.stack = null // 终态后不再需要运行栈
+    return task
+  }
+
+  /** 聊天任务挂起（AWAIT_CLARIFY）：保留运行栈等回复（A6：会话内有效）。 */
+  suspend(taskId, clarify) {
+    const task = this.tasks.get(taskId)
+    if (!task) return null
+    task.status = 'suspended'
+    task.clarify = clarify
     return task
   }
 

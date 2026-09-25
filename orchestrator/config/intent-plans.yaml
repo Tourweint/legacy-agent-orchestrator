@@ -21,6 +21,11 @@ intents:
     slots:
       required: [classroomName, datePhrase, timeSegment]
       optional: [reason]          # 缺省值的业务口径未定——实现时确定并登记（第 03 章 §8.1：须标注"按默认处理"）
+      # slotHints：理解层提示词的槽位释义（从计划生成，不手抄；阶段 5 增补）
+      slotHints:
+        classroomName: 教室名（用户原话，可一次说多间，如"数智楼123和222"）
+        datePhrase: 日期说法（用户原话，如"周三""明天""10月1日"——不要换算成日期）
+        timeSegment: 时段说法（用户原话，如"下午""晚上""上午八点到十点"）
     facts: [F1, F3, F4, F5, F6]   # F2 不在主链路（第 01 章 §6.1 ③）
     propositions:
       - P-CLASSROOM-EXISTS
@@ -47,6 +52,8 @@ intents:
       # recordId 不可得（如提交时响应丢失）→ 不得猜，直接 VERIFY_INCONCLUSIVE（第 06 章 §8.1）
       recordIdRequired: true
       listNotPersisted: true    # K3 三审拍板：补偿清单不持久化，随任务销毁
+    resolution:
+      candidatesFrom: edu.classroom.available   # 名字解析来源（人读名 → 候选列表匹配房间号）
     degrade:
       candidatesFrom: edu.classroom.available
       # available_list 只是候选池（无时间参数），每项仍逐项走完整命题校验；
@@ -62,6 +69,10 @@ intents:
     slots:
       required: [classroomName, datePhrase, timeSegment]
       optional: []
+      slotHints:
+        classroomName: 教室名（用户原话，如"数智楼222"）
+        datePhrase: 日期说法（用户原话——不要换算成日期）
+        timeSegment: 时段说法（用户原话，如"下午"）
     facts: [F1, F3, F4, F5, F6]   # F5 支撑 P-SLOT-FREE 的降级交叉印证（F4 不可得时）；F2 不在链路（第 01 章 §6.1 ③）
     propositions:
       - P-CLASSROOM-EXISTS
@@ -73,6 +84,8 @@ intents:
       - { step: occupied-seats,     interface: edu.classroom.reservedSeats,   serves: F3 }
       - { step: admin-reservations, interface: logi.reservation.list,         serves: F4 }
       - { step: maintenance-list,   interface: logi.maintenance.list,         serves: F6 }
+    resolution:
+      candidatesFrom: edu.classroom.available   # 查询意图不降级，但名字解析仍需要它
     verification: null
     compensation: null
     degrade: null                 # 查询无降级：被占/检修都如实答复，不"换一间替你问"

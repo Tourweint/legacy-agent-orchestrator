@@ -93,6 +93,10 @@ export function mapEntryToEvent(entry, factNames = FACT_NAMES) {
       text: summary,
     }
   }
+  if (entry.action.startsWith('ask:')) {
+    // 需要用户输入（追问/换时段确认）：界面在对话视图出现交互（§6.2）
+    return { ...base, type: 'input-required', status: 'running', text: summary }
+  }
   if (entry.action.startsWith('decide:')) {
     const outcome = entry.conclusion?.outcome ?? ''
     return {

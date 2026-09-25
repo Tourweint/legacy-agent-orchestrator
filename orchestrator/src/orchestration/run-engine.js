@@ -11,58 +11,96 @@ import { isTerminal } from './state-machine.js'
 import { normalizeSpace } from '../judgment/predicates.js'
 import { describeRange } from '../canonical/time.js'
 
+function machineGuard(taskContext) {
+  if (!taskContext.machine) throw new OrchestrationError('taskContext.machine 未初始化（由 TaskRunner 注入）')
+}
+
 export class RunEngine {
-  constructor({ configStore, gateway, judgmentEngine, verifier, evidenceChain }) {
+  constructor({ configStore, gateway, judgmentEngine, verifier, evidenceChain, chatBridge }) {
     this.store = configStore
     this.gateway = gateway
     this.judgment = judgmentEngine
     this.verifier = verifier
     this.evidenceChain = evidenceChain
+    this.chatBridge = chatBridge
   }
 
   /**
+   * 执行一次运行直到终态或挂起（AWAIT_CLARIFY，chat 专用）。
    * @param {object} p
-   * @param {string} p.kind            'forward' | 'compensate'
-   * @param {string} p.startState      IDLE（首个运行）/ GATHERING（后续资源运行）/ COMPENSATING（补偿运行）
-   * @param {object} p.taskContext     跨运行共享：补偿清单、降级轮次、查证计数、当前目标
+   * @param {string} p.kind            'forward' | 'compensate' | 'chat'
+   * @param {string} p.startState      IDLE / GATHERING / COMPENSATING
+   * @param {object} p.taskContext     跨运行共享：意图、补偿清单、降级轮次、查证计数、聊天状态
    */
-  async run({ intent, machine, kind, startState, resource, slot, reason, identity, taskContext }) {
-    machine.begin(startState, kind)
+  async run({ kind, startState, resource, slot, reason, identity, taskContext }) {
+    machineGuard(taskContext)
+    const machine = taskContext.machine
+    machine.begin(startState, kind === 'chat' ? 'forward' : kind)
     taskContext.outcome = null
-    if (kind === 'forward') {
+    if (kind === 'chat') {
+      taskContext.identity = identity
+      // 首轮用户输入已由 task-runner 放入 taskContext.chat.pendingTurn
+      machine.fire('START') // 自然语言入口（第 04 章 §4.1）
+    } else if (kind === 'forward') {
       taskContext.slot = slot
       taskContext.identity = identity
       taskContext.reason = reason
       taskContext.originalClassroom = null // 降级基准按运行计：每个资源有自己的"原教室"（§8.1）
       if (startState === 'IDLE') machine.fire('START_STRUCT') // 结构化任务入口（无 LLM 路径，第 03 章 §十）
     }
-    while (!isTerminal(machine.state)) {
+    return this.#drive({ machine, taskContext, resource, kind })
+  }
+
+  /** 挂起恢复：追问后重问理解层（§5.5：不拼接片段，走同样的闸门）。 */
+  async resume({ taskContext, replyText }) {
+    const machine = taskContext.machine
+    this.chatBridge.beginResume({ taskContext, replyText })
+    machine.fire('USER_REPLIED') // AWAIT_CLARIFY → UNDERSTANDING
+    return this.#drive({ machine, taskContext, kind: 'chat' })
+  }
+
+  // 驱动循环：终态或挂起时返回；其余状态逐个交给处理器
+  async #drive({ machine, taskContext, resource, kind }) {
+    while (!isTerminal(machine.state) && machine.state !== 'AWAIT_CLARIFY') {
       switch (machine.state) {
-        case 'RESOLVING': await this.#doResolving({ intent, machine, resource, taskContext }); break
-        case 'GATHERING': await this.#doGathering({ intent, machine, taskContext }); break
-        case 'VALIDATING': await this.#doValidating({ intent, machine, taskContext }); break
-        case 'SUBMITTING': await this.#doSubmitting({ intent, machine, taskContext }); break
-        case 'JUDGING': this.#doJudging({ intent, machine, taskContext }); break
-        case 'VERIFYING': await this.#doVerifying({ intent, machine, taskContext }); break
-        case 'DEGRADING': await this.#doDegrading({ intent, machine, taskContext }); break
+        case 'UNDERSTANDING': await this.chatBridge.handleUnderstanding({ machine, taskContext }); break
+        case 'RESOLVING': await this.#doResolving({ machine, resource, taskContext }); break
+        case 'GATHERING': await this.#doGathering({ machine, taskContext }); break
+        case 'VALIDATING': await this.#doValidating({ machine, taskContext }); break
+        case 'SUBMITTING': await this.#doSubmitting({ machine, taskContext }); break
+        case 'JUDGING': this.#doJudging({ machine, taskContext }); break
+        case 'VERIFYING': await this.#doVerifying({ machine, taskContext }); break
+        case 'DEGRADING': await this.#doDegrading({ machine, taskContext }); break
         case 'COMPENSATING': await this.#doCompensating({ machine, taskContext }); break
         default:
           throw new OrchestrationError(`状态处理器缺失: ${machine.state}`)
       }
     }
-    return { terminal: machine.state, message: taskContext.outcome?.message ?? '' }
+    return {
+      terminal: isTerminal(machine.state) ? machine.state : null,
+      suspended: machine.state === 'AWAIT_CLARIFY',
+      message: taskContext.outcome?.message ?? '',
+    }
   }
 
   // ── 实体消解（RESOLVING）：人读名 → 系统标识。列表查询走意图计划声明的候选来源接口 ──
-  async #doResolving({ intent, machine, resource, taskContext }) {
-    const classroom = resource?.classroom ?? {}
+  async #doResolving({ machine, resource, taskContext }) {
+    // 目标来自任务上下文：结构化运行由队列播种，聊天运行由桥在归一化后播种
+    const classroom = taskContext.currentTarget ?? {}
     if (classroom.classroomId != null) {
       taskContext.currentTarget = { ...classroom }
       machine.fire('ENTITY_RESOLVED', { payload: classroom.classroomId })
       return
     }
     // 查询失败与未找到统一走 ENTITY_UNRESOLVED → REJECTED：尚未产生任何副作用，保守拒绝一致
-    const r = await this.gateway.call(intent.degrade.candidatesFrom, {
+    // 名字解析来源：resolution.candidatesFrom（解析 ≠ 降级——查询意图不降级但也要解析名字）
+    const resolveVia = taskContext.intent.resolution?.candidatesFrom ?? taskContext.intent.degrade?.candidatesFrom
+    if (!resolveVia) {
+      taskContext.outcome = { message: '意图计划缺少名字解析来源（resolution.candidatesFrom）。' }
+      machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'no-resolution-source' } })
+      return
+    }
+    const r = await this.gateway.call(resolveVia, {
       building: classroom.building,
       minCapacity: 0,
     }, { phase: 'P2' })
@@ -93,9 +131,9 @@ export class RunEngine {
   }
 
   // ── 事实收集（GATHERING）：F1 先行解析，其余命题依赖的事实随后；全部/部分不可得都进判定 ──
-  async #doGathering({ intent, machine, taskContext }) {
+  async #doGathering({ machine, taskContext }) {
     const { facts, identity } = await this.judgment.collectFacts({
-      intentId: intent.id,
+      intentId: taskContext.intentId,
       target: { classroom: taskContext.currentTarget, slot: taskContext.slot },
       identity: taskContext.identity,
     })
@@ -114,9 +152,9 @@ export class RunEngine {
   }
 
   // ── 命题判定（VALIDATING）：判定层给结论集合，这里只按数据里的特例与优先级选事件 ──
-  async #doValidating({ intent, machine, taskContext }) {
+  async #doValidating({ machine, taskContext }) {
     const judgment = this.judgment.judge({
-      intentId: intent.id,
+      intentId: taskContext.intentId,
       target: { classroom: taskContext.currentTarget, slot: taskContext.slot },
       identity: taskContext.identity,
       facts: taskContext.facts,
@@ -133,7 +171,7 @@ export class RunEngine {
       })
 
     // 只读意图：判定给出答案即完成（含"被占/检修"的如实答复），CHECK_ONLY → DONE
-    if (intent.readOnly) {
+    if (taskContext.intent.readOnly) {
       const answer = this.#queryAnswer(judgment)
       decide('CHECK_ONLY', [...s.satisfied, ...s.violated.map((v) => v.id), ...s.unconfirmable.map((u) => u.id)], answer)
       taskContext.outcome = { message: answer }
@@ -179,10 +217,10 @@ export class RunEngine {
   }
 
   // ── 提交（SUBMITTING）：唯一副作用出口。两种目的走同一处理器，接口来自意图计划 ──
-  async #doSubmitting({ intent, machine, taskContext }) {
+  async #doSubmitting({ machine, taskContext }) {
     if (machine.purpose === 'forward') {
-      const submitStep = (intent.steps ?? []).find((s) => s.role === 'submit')
-      if (!submitStep) throw new OrchestrationError(`意图 ${intent.id} 缺少 role=submit 的步骤`)
+      const submitStep = (taskContext.intent.steps ?? []).find((s) => s.role === 'submit')
+      if (!submitStep) throw new OrchestrationError(`意图 ${taskContext.intentId} 缺少 role=submit 的步骤`)
       const r = await this.gateway.call(submitStep.interface, {
         classroomId: taskContext.currentTarget.classroomId,
         start: taskContext.slot.start,
@@ -210,7 +248,7 @@ export class RunEngine {
     // 补偿撤销：撤销动作来自意图计划的 compensation 声明
     const item = taskContext.currentCompensation
     const r = await this.gateway.call(
-      intent.compensation.action,
+      taskContext.intent.compensation.action,
       { recordId: item.recordId },
       { initiatorIdentity: item.identityId, phase: 'P5' },
     )
@@ -219,7 +257,7 @@ export class RunEngine {
   }
 
   // ── 结果定性（JUDGING）：接触层已完成三值判定，这里按目的映射终局事件 ──
-  #doJudging({ intent, machine, taskContext }) {
+  #doJudging({ machine, taskContext }) {
     const r = taskContext.lastCall
     if (machine.purpose === 'forward') {
       if (r.verdict === 'SUCCESS') {
@@ -242,7 +280,7 @@ export class RunEngine {
   }
 
   // ── 查证（VERIFYING）：UNKNOWN 的唯一去向；重试上限按目的分别计数（§七）──
-  async #doVerifying({ intent, machine, taskContext }) {
+  async #doVerifying({ machine, taskContext }) {
     const constants = this.store.getConstants()
     if (machine.purpose === 'forward') {
       if (taskContext.counters.forwardVerify >= constants.verification.forwardAttempts) {
@@ -252,7 +290,7 @@ export class RunEngine {
       }
       taskContext.counters.forwardVerify += 1
       const v = await this.verifier.verifyForward({
-        intent,
+        intent: taskContext.intent,
         target: { classroom: taskContext.currentTarget, slot: taskContext.slot },
         identity: taskContext.identity,
       })
@@ -284,7 +322,7 @@ export class RunEngine {
       return
     }
     taskContext.counters.compensateVerify += 1
-    const v = await this.verifier.verifyCompensate({ intent, recordId: taskContext.currentCompensation?.recordId })
+    const v = await this.verifier.verifyCompensate({ intent: taskContext.intent, recordId: taskContext.currentCompensation?.recordId })
     this.#decide(taskContext, {
       phase: 'P5',
       action: 'decide:verify-compensate',
@@ -303,7 +341,7 @@ export class RunEngine {
   }
 
   // ── 降级（DEGRADING）：原教室即基准（同楼栋、不降容量），每轮一个候选、事实从零重取（J6）──
-  async #doDegrading({ intent, machine, taskContext }) {
+  async #doDegrading({ machine, taskContext }) {
     const constants = this.store.getConstants()
     const tried = taskContext.triedCandidates
     const base = taskContext.originalClassroom ?? taskContext.currentTarget
@@ -313,7 +351,7 @@ export class RunEngine {
       machine.fire('DEGRADE_EXHAUSTED')
       return
     }
-    const r = await this.gateway.call(intent.degrade.candidatesFrom, {
+    const r = await this.gateway.call(taskContext.intent.degrade.candidatesFrom, {
       building: base.building,
       minCapacity: base.capacity ?? 0,
     }, { phase: 'P5' })

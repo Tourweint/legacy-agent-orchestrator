@@ -10,6 +10,8 @@
 import { createServer } from 'node:http'
 import { EvidenceChain } from '../evidence/evidence-chain.js'
 import { ContactGateway } from '../contact/contact-gateway.js'
+import { UnderstandingEngine } from '../understanding/understanding.js'
+import { LlmClient } from '../understanding/llm-client.js'
 import { ProtocolAdapters } from '../contact/adapters.js'
 import { JudgmentEngine } from '../judgment/judgment-engine.js'
 import { TaskRunner } from '../orchestration/task-runner.js'
@@ -24,6 +26,7 @@ export const ERROR_CODES = {
   BAD_RESOURCES: 4002,
   BAD_SLOT: 4003,
   BAD_IDENTITY: 4004,
+  TASK_NOT_SUSPENDED: 4090,
   TASK_NOT_FOUND: 4040,
   ROUTE_NOT_FOUND: 4044,
   INTERNAL: 5000,
@@ -78,11 +81,28 @@ function validateTaskBody(body) {
  * @param {import('../contact/http-transport.js').HttpTransport} deps.transport  共享传输（唯一出口在接触层）
  * @param {import('../contact/identity-pool.js').IdentityPool} deps.identityPool 共享身份池（token 缓存跨任务）
  */
-export function createAccessServer({ configStore, transport, identityPool, adapters }) {
+export function createAccessServer({ configStore, transport, identityPool, adapters, llm }) {
+  const llmClient = llm ?? new LlmClient()
   const adapterImpl = adapters ?? new ProtocolAdapters({ configStore })
   // 共享装配（构造期一次）：适配器与身份池跨任务复用；证据链按任务独立
   const sharedGateway = new ContactGateway({ configStore, transport, identityPool, adapters: adapterImpl })
   const taskStore = new TaskStore()
+
+  // 每任务运行栈：证据链/网关/判定/理解（留档绑定本任务链）/编排
+  function newTaskStack(taskId) {
+    const chain = new EvidenceChain({ taskId, evidenceConstants: configStore.getConstants().evidence })
+    const taskGateway = sharedGateway.forTask(chain)
+    const judgment = new JudgmentEngine({ configStore, gateway: taskGateway, evidenceChain: chain })
+    const understanding = new UnderstandingEngine({ configStore, llm: llmClient, evidenceChain: chain })
+    const runner = new TaskRunner({
+      configStore,
+      gateway: taskGateway,
+      judgmentEngine: judgment,
+      evidenceChain: chain,
+      understandingEngine: understanding,
+    })
+    return { chain, runner }
+  }
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost')
@@ -122,13 +142,11 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         // 每任务独立证据链与运行栈；传输/身份池/适配器共享
         taskSeq += 1
         const taskId = `T-${Date.now()}-${taskSeq}`
-        const chain = new EvidenceChain({ taskId, evidenceConstants: configStore.getConstants().evidence })
-        const taskGateway = sharedGateway.forTask(chain)
-        const judgment = new JudgmentEngine({ configStore, gateway: taskGateway, evidenceChain: chain })
-        const runner = new TaskRunner({ configStore, gateway: taskGateway, judgmentEngine: judgment, evidenceChain: chain })
+        const { chain, runner } = newTaskStack(taskId)
         taskStore.register({
           taskId,
           chain,
+          runner,
           run: runner
             .executeTask({
               intentId: body.intentId,
@@ -147,6 +165,109 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         return
       }
 
+      // 自然语言入口（阶段 5 开放）：理解层产出结构化意图后汇入同一资源队列（第 03 章 §十）
+      if (route === 'POST /api/chat') {
+        const raw = await readBody(req)
+        let body
+        try {
+          body = JSON.parse(raw || '{}')
+        } catch {
+          sendJson(res, 400, ERROR_CODES.BAD_JSON, '请求体不是合法 JSON')
+          return
+        }
+        if (typeof body.text !== 'string' || !body.text.trim()) {
+          sendJson(res, 400, ERROR_CODES.BAD_JSON, '缺少 text（用户原话）')
+          return
+        }
+        if (typeof body.identity !== 'string' || !body.identity) {
+          sendJson(res, 400, ERROR_CODES.BAD_IDENTITY, '缺少 identity（业务身份标识）')
+          return
+        }
+        taskSeq += 1
+        const taskId = `T-${Date.now()}-${taskSeq}`
+        const { chain, runner } = newTaskStack(taskId)
+        const task = taskStore.register({
+          taskId,
+          chain,
+          runner,
+          stack: null, // 挂起时由下方回填运行栈
+          run: runner
+            .executeChatTask({ text: body.text, identity: { id: body.identity } })
+            .then((outcome) => {
+              if (outcome.suspended) {
+                task.stack = outcome.stack
+                taskStore.suspend(taskId, outcome.clarify)
+              } else {
+                taskStore.complete(taskId, outcome.result)
+              }
+              return outcome
+            }),
+        })
+        void task
+        sendJson(res, 200, ERROR_CODES.OK, 'accepted', { taskId, eventsPath: `/api/tasks/${taskId}/events` })
+        return
+      }
+
+      // 挂起任务的追问回复（B8：AWAIT_CLARIFY 在写请求发出前，取消/回复均生效）
+      const replyMatch = /^\/api\/tasks\/([^/]+)\/reply$/.exec(url.pathname)
+      if (req.method === 'POST' && replyMatch) {
+        const task = taskStore.get(decodeURIComponent(replyMatch[1]))
+        if (!task) {
+          sendJson(res, 404, ERROR_CODES.TASK_NOT_FOUND, '任务不存在')
+          return
+        }
+        if (task.status !== 'suspended') {
+          sendJson(res, 409, ERROR_CODES.TASK_NOT_SUSPENDED, `任务当前状态为 ${task.status}，无法回复（仅挂起中的追问可回复）`)
+          return
+        }
+        const raw = await readBody(req)
+        let body
+        try {
+          body = JSON.parse(raw || '{}')
+        } catch {
+          sendJson(res, 400, ERROR_CODES.BAD_JSON, '请求体不是合法 JSON')
+          return
+        }
+        if (typeof body.text !== 'string' || !body.text.trim()) {
+          sendJson(res, 400, ERROR_CODES.BAD_JSON, '缺少 text（回复原话）')
+          return
+        }
+        task.status = 'running'
+        task.clarify = null
+        runnerFor(task)?.resumeChat({ stack: task.stack, replyText: body.text }).then((outcome) => {
+          if (outcome.suspended) {
+            task.status = 'suspended'
+            task.clarify = outcome.clarify
+          } else {
+            taskStore.complete(task.taskId, outcome.result)
+          }
+        })
+        sendJson(res, 200, ERROR_CODES.OK, 'accepted', { taskId: task.taskId, eventsPath: `/api/tasks/${task.taskId}/events` })
+        return
+      }
+
+      // 取消挂起中的任务（B8：写请求发出前生效；提交后的取消是忽略型无边）
+      const cancelMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname)
+      if (req.method === 'DELETE' && cancelMatch) {
+        const task = taskStore.get(decodeURIComponent(cancelMatch[1]))
+        if (!task) {
+          sendJson(res, 404, ERROR_CODES.TASK_NOT_FOUND, '任务不存在')
+          return
+        }
+        if (task.status !== 'suspended') {
+          sendJson(res, 409, ERROR_CODES.TASK_NOT_SUSPENDED, `任务当前状态为 ${task.status}——已提交后的取消不生效（B8），结果将由查证收敛给出`)
+          return
+        }
+        try {
+          const { result } = runnerFor(task).cancelChat({ stack: task.stack })
+          taskStore.complete(task.taskId, result)
+          sendJson(res, 200, ERROR_CODES.OK, 'cancelled', result)
+        } catch (err) {
+          sendJson(res, 500, ERROR_CODES.INTERNAL, `取消失败：${err.message}`)
+        }
+        return
+      }
+
       // 任务结果快照（调试/兜底；主通道是事件流）
       const snapshotMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname)
       if (req.method === 'GET' && snapshotMatch) {
@@ -159,6 +280,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           taskId: task.taskId,
           status: task.status,
           result: task.result,
+          clarify: task.status === 'suspended' ? task.clarify : undefined,
           createdAt: task.createdAt,
         })
         return
@@ -216,6 +338,10 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       sendJson(res, 500, ERROR_CODES.INTERNAL, `内部错误：${err.message}`)
     }
   })
+
+  function runnerFor(task) {
+    return task.runner
+  }
 
   return { server, taskStore }
 }
