@@ -133,10 +133,23 @@ export class FactCollector {
     if (!classroomId) return notApplicable('需要先解析出教室 id（F1）')
     const r = await this.gateway.call('edu.classroom.seats', { classroomId }, { phase: 'P2' })
     if (r.verdict !== 'SUCCESS') return unobtainable(r, '座位布局查询未成功')
-    const raw = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.seats) ? r.data.seats : null
+    // 形状三种都认（2026-09-26 实测：真实返回是**一个对象**，座位列表在 `seatVOS` 里，
+    // 形如 {classroomId, seatRows, seatCols, seatVOS:[{id, seatNumber:"1-1", status}]}；
+    // 只认数组/`seats` 的写法在真机上会一律判"形状未知"——实测踩到）
+    const raw = Array.isArray(r.data)
+      ? r.data
+      : Array.isArray(r.data?.seats)
+        ? r.data.seats
+        : Array.isArray(r.data?.seatVOS)
+          ? r.data.seatVOS
+          : null
     if (raw === null) return unobtainable(null, '座位布局响应形状未知', 'seat-layout-shape-unknown')
     return obtained(
-      { seats: raw.map((s) => ({ seatId: s.id ?? s.seatId, seatNumber: s.seatNumber, status: s.status })) },
+      {
+        seats: raw.map((s) => ({ seatId: s.id ?? s.seatId, seatNumber: s.seatNumber, status: s.status })),
+        rows: r.data?.seatRows ?? null,
+        cols: r.data?.seatCols ?? null,
+      },
       {},
     )
   }

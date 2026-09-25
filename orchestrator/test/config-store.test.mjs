@@ -22,21 +22,23 @@ function makeTmpStore(mutate) {
   }
 }
 
-test('装载全部配置：14 条接口、5 个意图、3 个身份、15 个状态', () => {
+test('装载全部配置：14 条接口、6 个意图、3 个身份、15 个状态', () => {
   const store = new ConfigStore(CONFIG_DIR)
   // 12 → 14：新增 auth.refresh / auth.logout（登录会话续期与登出，登录方案决定 6）
   assert.equal(store.allInterfaces.length, 14)
-  // 2 → 5：C7 上线（查询我的预约 / 撤销我的预约）+ C8 改期
-  assert.equal(store.intentList.length, 5)
+  // 2 → 6：C7（查/退我的预约）+ C8 改期 + C12 学生占座
+  assert.equal(store.intentList.length, 6)
   assert.equal(store.identityList.length, 3)
   assert.equal(Object.keys(store.getStateMachine().states).length, 15)
 })
 
-test('注册表关键标志：自动编排三档（classroom.create 是 / seat.create 否 / maintenance.create 否）', () => {
+test('注册表关键标志：自动编排开关（教室/座位/撤销放行；维修窗口创建仍禁）', () => {
   const store = new ConfigStore(CONFIG_DIR)
   assert.equal(store.getInterface('edu.reservation.classroom.create').autoOrchestration, true)
   assert.equal(store.getInterface('edu.reservation.cancel').autoOrchestration, true)
-  assert.equal(store.getInterface('edu.reservation.seat.create').autoOrchestration, false)
+  // 2026-09-26：C12 拍板"座位预约接口早已纳管、仅需放行"——autoOrchestration 由 false 改 true
+  assert.equal(store.getInterface('edu.reservation.seat.create').autoOrchestration, true)
+  // 维修窗口创建仍不进自动编排（C14 的两个管理域动作另行拍板）
   assert.equal(store.getInterface('logi.maintenance.create').autoOrchestration, false)
 })
 

@@ -204,3 +204,53 @@ intents:
       kind: my-reservation
       hints: { classroomName: classroomName, datePhrase: originalDatePhrase, timeSegment: originalTimeSegment }
     degrade: null
+
+  # ── C12 学生占座：帮我占明天下午数智楼123的 A3 ──────────────────────────────
+  # 为什么便宜：座位预约的**提交、查证、撤销三样早就写好了**，命题 P-SEAT-EXISTS /
+  # P-SEAT-SLOT-FREE 也早已存在，当初只是被判为"不属于主链路"而关了开关——本次放行。
+  # 它也是**学生身份**的第一条真实写链路（此前学生只能查，或者在越权时被有依据地拒绝）。
+  - id: borrow-seat
+    name: 占座位
+    readOnly: false
+    multiResource: false
+    requiredRole: STUDENT
+    roleDeniedMessage: 座位预约是学生通道；您可以直接借整间教室，我可以现在帮您办。
+    roleAlternatives: [borrow-classroom]
+    slots:
+      required: [classroomName, seatNumber, datePhrase, timeSegment]
+      optional: [reason]
+      slotHints:
+        classroomName: 教室名（如"数智楼123"）
+        seatNumber: 座位号（如"1-1"——按座位布局里的编号，形如"行-列"）
+        datePhrase: 日期说法（如"明天"——不要换算成日期）
+        timeSegment: 时段说法（如"下午"）
+        reason: 事由（可选）
+    facts: [F1, F2, F3, F5]
+    propositions:
+      - P-CLASSROOM-EXISTS
+      - P-CLASSROOM-ENABLED
+      - P-SEAT-EXISTS          # 学生说的座位号必须真的存在（从布局里解析座位 id）
+      - P-SEAT-SLOT-FREE       # 该座位该时段空闲
+    steps:
+      - { step: resolve-classroom, interface: edu.classroom.detail,        serves: "F1 + 实体消解" }
+      - { step: seat-layout,       interface: edu.classroom.seats,         serves: "F2（座位号 → 座位 id）" }
+      - { step: occupied-seats,    interface: edu.classroom.reservedSeats, serves: F3 }
+      - { step: my-reservations,   interface: edu.reservation.mine,        serves: "F5（发起时身份）" }
+      - { step: submit-seat,       interface: edu.reservation.seat.create, serves: "提交（唯一写出口，仅 SUBMITTING 态发出）", role: submit,
+          params: { seatId: "target.seatId", start: "slot.start", end: "slot.end" } }
+    verification:
+      # 与教室预约同口径：首选跨身份全量列表（座位记录也在其中），降级本人列表交叉印证
+      primary:  { interface: logi.reservation.list, identity: ADMIN }
+      fallback: { interface: edu.reservation.mine,  identity: initiator }
+      predicate:
+        forward: "按座位 + 时段重叠 + 写入者=本人 定位（只认 ACTIVE）"
+        compensate: "按 recordId 定位：查无此 id 或状态非 ACTIVE = 撤销已生效（第 06 章 §8.1）"
+    compensation:
+      action: edu.reservation.cancel
+      recordIdRequired: true
+      listNotPersisted: true
+    successMessage: 已为您占好座位
+    failureMessage: 这个座位没能占上，您原来的预约未受影响。
+    resolution:
+      candidatesFrom: edu.classroom.available   # 座位是座位级的，但教室仍要先定位（F1/F2 都依赖它）
+    degrade: null

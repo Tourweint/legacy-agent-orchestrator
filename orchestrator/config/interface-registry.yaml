@@ -208,10 +208,13 @@ interfaces:
     method: POST
     path: /reservations/seats
     timeoutClass: write
-    purpose: 提交座位预约（纳管留档；作为"粒度差异"的对照，D2：不进入自动编排）
+    purpose: 提交座位预约（能力清单 C12：学生身份的座位级预约；2026-09-26 放行进入自动编排）
     requiredIdentity: initiator  # 座位预约的发起人就是登录者本人（学生或教师），不再写死 STUDENT
     sideEffect: true
-    autoOrchestration: false   # D2：座位预约不是主链路，不被任何意图计划引用（自检项 8）
+    # 2026-09-26 放开开关：C12 拍板"接口早已纳管、仅需放行"（原 D2 判为只读演示的对照件）。
+    # 放行的前提是三条都成立：命题齐备（P-SEAT-EXISTS / P-SEAT-SLOT-FREE）、补偿动作明确
+    # （edu.reservation.cancel，且其 requiredIdentity 已是 initiator）、有查证路径（mine）。
+    autoOrchestration: true
     idempotentBusinessKey: 身份+座位+时段
     verification:
       via: edu.reservation.mine

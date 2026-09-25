@@ -90,11 +90,11 @@ test('自检 7：清空 FAILED 的入边 → 终态永不可达', () => {
 
 test('自检 8：意图引用禁止自动编排的接口 → 查出 M8/D2 违规', () => {
   const data = baseData()
-  data.plans.intents[0].steps[0].interface = 'edu.reservation.seat.create'
+  data.plans.intents[0].steps[0].interface = 'logi.maintenance.create'
   const outcome = runStructureChecks(data)
   const check = outcome.results.find((r) => r.no === 8)
   assert.equal(check.pass, false)
-  assert.ok(check.details[0].includes('edu.reservation.seat.create'))
+  assert.ok(check.details[0].includes('logi.maintenance.create'))
 
   // 引用不存在的接口同样算违规
   const data2 = baseData()

@@ -122,7 +122,8 @@ export class JudgmentEngine {
       facts,
       constants: this.store.getConstants(),
       identity,
-      target: { classroom, slot: target.slot, seatId: target.seatId },
+      // seatNumber：用户原话里的座位号（"A3"）——座位解析不到时，拒绝话术要引用它而不是空 id
+      target: { classroom, slot: target.slot, seatId: target.seatId, seatNumber: target.seatNumber ?? null },
     }
   }
 

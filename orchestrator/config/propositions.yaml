@@ -129,10 +129,11 @@ propositions:
 
   # ── 非主链路（只读演示用；无意图引用，留档以备"粒度差异"之问，第 01 章 §6.1 ③）──
   - id: P-SEAT-EXISTS
-    semantics: 指定座位存在
+    semantics: 指定座位存在——用户说的座位号能在布局里解析到座位 id
     dependsOn: [F2]
     when: {op: seat-present}
-    violatedMessage: '没有找到座位 {{target.seatId}}。'
+    # 话术引用**用户说的座位号**而不是内部 id（零术语；也避免解析不到时话术里出现空值）
+    violatedMessage: '这间教室的座位布局里没有「{{target.seatNumber}}」这个座位，请换一个座位号。'
     degradable: false
     invariants: [I1]
 
@@ -144,7 +145,8 @@ propositions:
         - {op: seat-present, as: seat}
         - {op: seat-free, as: seatSlot}
     violatedMessages:
-      seat: '没有找到座位 {{target.seatId}}。'
-      seatSlot: 该座位在这段时间已被占用。
+      # 引用用户说的座位号（零术语，也避免解析不到时话术里出现空 id）
+      seat: '这间教室的座位布局里没有「{{target.seatNumber}}」这个座位，请换一个座位号。'
+      seatSlot: 该座位在这段时间已经被别人占了，请换一个座位或换个时段。
     degradable: false
     invariants: [I1]

@@ -145,7 +145,7 @@ export class RunEngine {
   async #doGathering({ machine, taskContext }) {
     const { facts, identity } = await this.judgment.collectFacts({
       intentId: taskContext.intentId,
-      target: { classroom: taskContext.currentTarget, slot: taskContext.slot },
+      target: this.#judgmentTarget(taskContext),
       identity: taskContext.identity,
     })
     taskContext.facts = facts
@@ -157,6 +157,9 @@ export class RunEngine {
       taskContext.currentTarget = { ...taskContext.currentTarget, ...facts.F1.value }
       taskContext.originalClassroom ??= { ...facts.F1.value }
     }
+    // C12 座位级目标：学生说的是座位号（"A3"），系统要的是座位 id——从座位布局（F2）里解析。
+    // 解析不到**不在这里下结论**：交给 P-SEAT-EXISTS 判"不成立"，话术引用学生说的那个座位号。
+    this.#resolveSeatTarget(taskContext, facts)
     const states = Object.values(facts).map((f) => f.state)
     const allObtained = states.every((s) => s === 'obtained')
     machine.fire(allObtained ? 'FACTS_READY' : 'FACT_UNAVAILABLE', { payload: { states } })
@@ -166,7 +169,7 @@ export class RunEngine {
   async #doValidating({ machine, taskContext }) {
     const judgment = this.judgment.judge({
       intentId: taskContext.intentId,
-      target: { classroom: taskContext.currentTarget, slot: taskContext.slot },
+      target: this.#judgmentTarget(taskContext),
       identity: taskContext.identity,
       facts: taskContext.facts,
     })
@@ -525,6 +528,40 @@ export class RunEngine {
       conclusion: { outcome: 'COMPENSATION_READY', summary: `回滚已生效副作用：预约 #${pending[0].recordId}（${pending[0].label}）` },
     })
     machine.fire('COMPENSATION_READY', { payload: taskContext.currentCompensation.recordId })
+  }
+
+  /** 判定层的目标形状（教室型 + 记录型 + 座位型共用一处，避免两处调用漂移）。 */
+  #judgmentTarget(taskContext) {
+    return {
+      classroom: taskContext.currentTarget ?? {},
+      slot: taskContext.slot,
+      seatId: taskContext.currentTarget?.seatId ?? null,
+      seatNumber: taskContext.slots?.seatNumber ?? taskContext.currentTarget?.seatNumber ?? null,
+    }
+  }
+
+  /**
+   * C12：把用户说的座位号解析成座位 id。
+   * 口径（实测补）：用户/模型会带上"号座位""第"这类量词（"1-1号座位"），
+   * 所以先归一化再比对；比对不上再退一步从话里抠出"行-列"数字对。
+   * 大小写与空格不敏感。解析不到不在这里下结论（由 P-SEAT-EXISTS 判"不成立"并引用原话座位号）。
+   */
+  #resolveSeatTarget(taskContext, facts) {
+    const spoken = String(taskContext.slots?.seatNumber ?? '').trim()
+    if (!spoken) return
+    const seats = facts.F2?.value?.seats ?? []
+    const norm = (text) => String(text).replace(/[第号座位\s]/g, '').toUpperCase()
+    const byNumber = new Map(seats.map((s) => [norm(s.seatNumber), s]))
+    let hit = byNumber.get(norm(spoken))
+    if (!hit) {
+      const digits = /\d+\s*-\s*\d+/.exec(spoken)
+      if (digits) hit = byNumber.get(digits[0].replace(/\s/g, ''))
+    }
+    taskContext.currentTarget = {
+      ...(taskContext.currentTarget ?? {}),
+      seatNumber: spoken,
+      ...(hit ? { seatId: hit.seatId, seatStatus: hit.status ?? null } : {}),
+    }
   }
 
   // ── C7 支持：记录级目标（"我的预约"）──────────────────────────────────────

@@ -83,9 +83,10 @@ test('闸门二：置信度不达标 → clarify 并列出候选意图（E5）',
   const result = await engine.understand({ text: '帮我弄一下教室' })
   assert.equal(result.status, 'clarify')
   assert.equal(result.reason, 'low-confidence')
-  // 候选来自意图计划闭集（C7/C8 上线后为 5 条）
+  // 候选来自意图计划闭集（C7/C8/C12 上线后为 6 条）
   assert.deepEqual(result.candidates.map((c) => c.id).sort(), [
     'borrow-classroom',
+    'borrow-seat',
     'cancel-my-reservation',
     'query-classroom-availability',
     'query-my-reservations',
@@ -161,17 +162,32 @@ function makeChatRunner(world, llmResponses) {
         ])
       case '/classrooms/4/reserved_seats':
       case '/classrooms/5/reserved_seats':
-        return ok([])
+        // C12：默认"这个时段没人占座"；用例可传 reservedSeatIds 造"座位已被占"的场景
+        return ok(world.reservedSeatIds ?? [])
       case '/admin/reservations': return ok(world.adminRows ?? [])
       case '/reservations': return ok(world.mineRows ?? []) // F5 我的预约（C7 用例在这里造数据）
       case '/admin/maintenance': return ok([])
       case '/reservations/classrooms': return world.create ?? ok(120)
-      default:
+      default: {
+        const barePath = String(req.path).split('?')[0]
+        // C12 座位级：座位布局（F2）、该时段被占座位（F3）、提交座位预约
+        if (req.method === 'GET' && /^\/classrooms\/\d+\/seats$/.test(barePath)) {
+          return ok(
+            world.seats ?? [
+              { id: 301, seatNumber: 'A1', status: 'AVAILABLE' },
+              { id: 309, seatNumber: 'A3', status: 'AVAILABLE' },
+            ],
+          )
+        }
+        if (req.method === 'POST' && barePath === '/reservations/seats') {
+          return world.seatCreate ?? ok(500)
+        }
         // C7 撤销：DELETE /reservations/{id}
         if (req.method === 'DELETE' && /^\/reservations\/\d+$/.test(req.path)) {
           return world.cancel ?? ok(null)
         }
         return ok(null)
+      }
     }
   })
   const judgment = new JudgmentEngine({ configStore: gateway.store, gateway, evidenceChain: chain })
@@ -329,12 +345,56 @@ const mineRow = (over = {}) => ({
   ...over,
 })
 
-const chat = (world, llmResponses, text) => {
+const chat = (world, llmResponses, text, role = 'TEACHER') => {
   const harness = makeChatRunner(world, llmResponses)
   return harness.runner
-    .executeChatTask({ text, identity: sessionIdentity('TEACHER') })
+    .executeChatTask({ text, identity: sessionIdentity(role) })
     .then((outcome) => ({ ...harness, outcome }))
 }
+
+// ---- C12 学生占座（座位级写入；2026-09-26 新增）--------------------------------
+
+const seatSlots = { classroomName: '数智楼123', seatNumber: 'A3', datePhrase: '明天', timeSegment: '下午' }
+const seatOut = (over = {}) => [
+  { intent: 'borrow-seat', slots: { ...seatSlots, ...over }, confidence: 0.9, outOfDomain: false },
+]
+const seatSubmits = (gateway) => gateway.transport.calls.filter((c) => c.path === '/reservations/seats')
+
+test('C12 占座：学生一句话占座 —— 座位号解析成座位 id 后提交，且只提交一次', async () => {
+  const { outcome, gateway } = await chat({ mineRows: [], adminRows: [] }, seatOut(), '帮我占明天下午数智楼123的A3座位', 'STUDENT')
+  assert.ok(!outcome.suspended)
+  assert.equal(outcome.result.terminal, 'DONE')
+  assert.match(outcome.result.conclusion, /已为您占好座位/)
+  const submits = seatSubmits(gateway)
+  assert.equal(submits.length, 1)
+  assert.equal(submits[0].body.seat_id, 309, '座位号 A3 被解析成座位 id 309 提交')
+})
+
+test('C12 占座：座位号不存在 → 有依据拒绝（引用学生说的座位号），零写入', async () => {
+  const { outcome, gateway } = await chat(
+    { seats: [{ id: 301, seatNumber: 'A1', status: 'AVAILABLE' }] },
+    seatOut({ seatNumber: 'A9' }),
+    '帮我占明天下午数智楼123的A9',
+    'STUDENT',
+  )
+  assert.equal(outcome.result.terminal, 'REJECTED')
+  assert.match(outcome.result.conclusion, /A9/)
+  assert.equal(seatSubmits(gateway).length, 0)
+})
+
+test('C12 占座：该座位这个时段已被占 → 有依据拒绝，零写入', async () => {
+  const { outcome, gateway } = await chat({ reservedSeatIds: [309] }, seatOut(), '帮我占明天下午数智楼123的A3', 'STUDENT')
+  assert.equal(outcome.result.terminal, 'REJECTED')
+  assert.match(outcome.result.conclusion, /已经被别人占了/)
+  assert.equal(seatSubmits(gateway).length, 0)
+})
+
+test('C12 占座：教师走学生通道 → 有依据拒绝并给替代动作，且零调用', async () => {
+  const { outcome, gateway } = await chat({}, seatOut(), '帮我占明天下午数智楼123的A3', 'TEACHER')
+  assert.equal(outcome.result.terminal, 'REJECTED')
+  assert.match(outcome.result.conclusion, /学生通道/)
+  assert.equal(gateway.transport.calls.length, 0, '拒绝发生在任何调用之前')
+})
 
 test('C7 查：一句话列出名下生效预约——只读、零写调用、不过实体消解', async () => {
   const { outcome, gateway } = await chat(
