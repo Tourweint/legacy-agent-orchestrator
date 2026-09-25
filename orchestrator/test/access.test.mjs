@@ -193,6 +193,26 @@ test('会话也接受 Authorization: Bearer（脚本与接口测试路径）', a
   }
 })
 
+test('术语对照表下发：未登录 401，登录后拿到事实/命题/规则的人话名（零术语）', async () => {
+  const { base, server } = await startServer({})
+  try {
+    const anon = await fetch(`${base}/api/meta/glossary`)
+    assert.equal(anon.status, 401)
+
+    const cookie = (await teacherLogin(base)).cookie
+    const res = await fetch(`${base}/api/meta/glossary`, { headers: { Cookie: cookie } })
+    assert.equal(res.status, 200)
+    const { data } = await res.json()
+    assert.equal(data.rules.R1, '读取成功')
+    assert.equal(data.facts.F5, '我名下的预约')
+    assert.ok(data.propositions['P-SLOT-FREE'])
+    // 零术语：任何名字里都不许再出现内部编号
+    for (const [id, title] of Object.entries(data.propositions)) assert.ok(!title.includes(id))
+  } finally {
+    server.close()
+  }
+})
+
 // ── 原有结构化任务路径（现在都要先登录）────────────────────────────────────
 
 test('正常任务：POST 返回 taskId → 快照到达 DONE → 结论含预约号', async () => {

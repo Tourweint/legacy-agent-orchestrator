@@ -35,6 +35,15 @@ export function apiMe() {
   return request('/api/auth/me')
 }
 
+/**
+ * 术语对照表（零术语纪律）：内部编号 → 人话名。唯一来源是引擎配置
+ * （orchestrator/config/glossary.yaml，经 GET /api/meta/glossary 下发）——
+ * 界面不写死第二份映射，否则一定会和引擎的规则表/命题清单漂移。
+ */
+export function apiGlossary() {
+  return request('/api/meta/glossary')
+}
+
 // ---- 业务端点（均要求已登录）----
 
 /** 自然语言入口（理解层 → 同一编排）。身份由会话派生，不再传 identity。 */

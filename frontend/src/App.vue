@@ -1,16 +1,28 @@
 <script setup>
 // 应用外壳 —— 2026-09-26 登录上线后新增一道闸门：未登录不进主界面。
 // 进入时先问一次"我是谁"（会话可能还在），会话失效则退回登录页并给"人话"提示。
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import ChatPane from './components/ChatPane.vue'
 import TrajectoryPane from './components/TrajectoryPane.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import LoginView from './views/LoginView.vue'
 import { useSessionStore } from './stores/session.js'
 import { useTaskStore } from './stores/task.js'
+import { useGlossaryStore } from './stores/glossary.js'
 
 const session = useSessionStore()
 const task = useTaskStore()
+const glossary = useGlossaryStore()
+
+// 术语对照表随登录状态加载/清空（零术语纪律）：登录后拉一次，退出时清掉——
+// 换个人登录不该沿用上一个人的界面状态。
+watch(
+  () => session.isLoggedIn,
+  (loggedIn) => {
+    if (loggedIn) glossary.load()
+    else glossary.reset()
+  },
+)
 
 const theme = ref(localStorage.getItem('theme') ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
 document.documentElement.dataset.theme = theme.value

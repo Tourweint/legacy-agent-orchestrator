@@ -55,7 +55,7 @@ export class ChatBridge {
         outcome: understanding.status === 'ok' ? 'INTENT_RESOLVED' : understanding.status.toUpperCase(),
         summary:
           understanding.status === 'ok'
-            ? `意图 = ${understanding.intent}；槽位 = ${JSON.stringify(understanding.slots)}`
+            ? this.#understandSummary(understanding)
             : understanding.clarifyQuestion ?? understanding.reasoning ?? understanding.status,
       },
     })
@@ -260,8 +260,23 @@ export class ChatBridge {
     return clarify.question ?? '补充信息'
   }
 
-  #decide(taskContext, { action, input, basis, conclusion, phase = 'P1' }) {
-    const entry = this.evidenceChain?.record({ phase, action, input, basis, conclusion })
+  /**
+   * 理解结果的展示文案（零术语 P1-3）：用业务名（"借教室"）与中文槽位短名，
+   * 不把 intentId（query-my-reservations）与英文键名（classroomName）甩到界面上。
+   */
+  #understandSummary(understanding) {
+    const plan = (this.store.intentList ?? []).find((i) => i.id === understanding.intent)
+    const labels = this.store.getGlossary().slots
+    const parts = Object.entries(understanding.slots ?? {})
+      .filter(([, value]) => value !== null && value !== undefined && value !== '')
+      .map(([key, value]) => `${labels[key] ?? key}=${value}`)
+    const name = plan?.name ?? understanding.intent
+    return parts.length > 0 ? `识别为「${name}」；条件：${parts.join('、')}` : `识别为「${name}」`
+  }
+
+  #decide(taskContext, { action, input, basis, conclusion, phase = 'P1', initiator, actingIdentity }) {
+    // initiator/actingIdentity：越权拒绝这类"没有调用但必须能回答是谁发起"的条目也要带上
+    const entry = this.evidenceChain?.record({ phase, action, input, basis, conclusion, initiator, actingIdentity })
     if (entry) taskContext.lastDecisionSeq = entry.seq
   }
 }

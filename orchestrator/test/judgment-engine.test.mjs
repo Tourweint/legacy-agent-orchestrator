@@ -218,6 +218,15 @@ test('验收①：新增一条只依赖已有事实的命题 → 只加 YAML，�
       '      - P-NOT-ALREADY-MINE        # 先查本人（幂等命中 → ALREADY_DONE → DONE，决策 C6）\n      - P-CAPACITY-AT-LEAST-40',
     )
     writeFileSync(planPath, plan)
+    // 新命题还要附上它的"人话名"（术语对照表 glossary.yaml 的 propositions 段）——
+    // 依旧只改 YAML、代码零改动；但界面上不许出现 `P-CAPACITY-AT-LEAST-40` 这种编号，
+    // 所以缺名字时启动即失败（零术语纪律）。注意要插进 propositions 段内、不能追加到文件尾。
+    const glossaryPath = join(dir, 'glossary.yaml')
+    const glossary = readFileSync(glossaryPath, 'utf8').replace(
+      '  P-SEAT-SLOT-FREE: 这个座位这段时间是空的',
+      '  P-SEAT-SLOT-FREE: 这个座位这段时间是空的\n  P-CAPACITY-AT-LEAST-40: 这间教室坐得下这么多人',
+    )
+    writeFileSync(glossaryPath, glossary)
 
     const store = new ConfigStore(dir)
     const { gateway } = makeGateway(() => ok(DETAIL))

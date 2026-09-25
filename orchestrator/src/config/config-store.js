@@ -48,7 +48,24 @@ export class ConfigStore {
     this.identities = readYamlFile(dir, 'identity-declarations.yaml')
     this.stateMachine = readYamlFile(dir, 'state-machine.yaml')
     this.propositions = readYamlFile(dir, 'propositions.yaml')
+    this.glossary = readYamlFile(dir, 'glossary.yaml')
     this.#validate()
+  }
+
+  /**
+   * 术语对照表（零术语纪律的单一数据源）：内部编号 → 人话名。
+   * 界面拿它把 `P-SLOT-FREE`/`R1`/`F4` 这类编号渲染成"这个时段是空的"这类人话；
+   * 查不到的编号由调用方原样显示（不隐藏、不编造），并由 glossary 覆盖测试保证不会有漏网。
+   */
+  getGlossary() {
+    return {
+      facts: { ...(this.glossary?.facts ?? {}) },
+      propositions: { ...(this.glossary?.propositions ?? {}) },
+      rules: { ...(this.glossary?.rules ?? {}) },
+      slots: { ...(this.glossary?.slots ?? {}) },
+      // 意图的人话名来自意图计划本身（唯一真相源已是配置，不在这里重抄一份）
+      intents: Object.fromEntries(this.intentList.map((it) => [it.id, it.name])),
+    }
   }
 
   // ---- 语义化查询 ----
@@ -114,6 +131,49 @@ export class ConfigStore {
     this.#validateIdentities()
     this.#validateStateMachine()
     this.#validatePropositions()
+    this.#validateGlossary()
+  }
+
+  /**
+   * 术语对照表校验：命题名字必须与命题清单一一对应（缺一个就拒绝启动）。
+   * 理由：界面上出现 `P-XXX` 这种编号、或出现一个名字对应不到的编号，都是"把内部实现
+   * 甩给用户看"——这类问题在演示现场才发现就晚了，所以在启动时挡住。
+   * （事实与规则的编号定义在代码里——fact-collectors.js 与 verdict-rules.js——
+   * 由 test/glossary.test.mjs 反向覆盖校验：凡代码里出现的编号都必须有名字。）
+   */
+  #validateGlossary() {
+    const g = this.glossary
+    if (!g || typeof g !== 'object') throw new ConfigError('术语对照表为空')
+    const titles = g.propositions ?? {}
+    const ids = new Set(this.propositions.propositions.map((p) => p.id))
+    for (const id of ids) {
+      if (!titles[id]) throw new ConfigError(`术语对照表缺少命题 ${id} 的人话名（零术语纪律）`)
+    }
+    for (const key of Object.keys(titles)) {
+      if (!ids.has(key)) throw new ConfigError(`术语对照表里的命题 ${key} 未在命题清单中登记`)
+    }
+    for (const [id, title] of Object.entries(g.rules ?? {})) {
+      if (!/^[WR]\d+$/.test(id)) throw new ConfigError(`术语对照表的规则编号非法: ${id}`)
+      if (!title || typeof title !== 'string') throw new ConfigError(`术语对照表的规则 ${id} 没有名字`)
+    }
+    for (const [id, title] of Object.entries(g.facts ?? {})) {
+      if (!/^F\d+$/.test(id)) throw new ConfigError(`术语对照表的事实编号非法: ${id}`)
+      if (!title || typeof title !== 'string') throw new ConfigError(`术语对照表的事实 ${id} 没有名字`)
+    }
+    // 槽位短名：意图计划里用到的每个槽位键都要有人话短名——否则"理解结果"里会冒出 classroomName
+    const slotLabels = g.slots ?? {}
+    for (const intent of this.intentList) {
+      const keys = new Set([
+        ...(intent.slots?.required ?? []),
+        ...(intent.slots?.optional ?? []),
+        ...Object.keys(intent.slots?.slotHints ?? {}),
+      ])
+      for (const key of keys) {
+        if (!slotLabels[key]) {
+          throw new ConfigError(`术语对照表缺少槽位 ${key} 的短名（意图 ${intent.id} 用到它）`)
+        }
+      }
+    }
   }
 
   #validateRegistry() {

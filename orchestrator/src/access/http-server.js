@@ -179,6 +179,14 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         sendJson(res, 401, AUTH_ERROR_CODES.UNAUTHORIZED, '未登录（请先登录：POST /api/auth/login）')
         return false
       }
+
+      // 术语对照表（零术语纪律）：界面拿它把 P-xxx / R1 / F4 这类内部编号渲染成人话。
+      // 放在受保护端点里（未登录 401）——它不是敏感数据，但保持"除健康检查与登录外一律要会话"的一致口径。
+      if (route === 'GET /api/meta/glossary') {
+        if (!requireSession()) return
+        sendJson(res, 200, ERROR_CODES.OK, 'ok', configStore.getGlossary())
+        return
+      }
       // 任务归属校验（影响面 #12）：只允许操作自己发起的任务；对他人任务不暴露任何内容
       const ownedTask = (taskId) => {
         const task = taskStore.get(taskId)

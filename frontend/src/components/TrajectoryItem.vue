@@ -1,9 +1,11 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useTaskStore } from '../stores/task.js'
+import { useGlossaryStore } from '../stores/glossary.js'
 
 const props = defineProps({ event: { type: Object, required: true } })
 const store = useTaskStore()
+const glossary = useGlossaryStore()
 const expanded = ref(false)
 
 // 身份的中文展示（§2.2：身份必须可见；不出现接口 URL/参数名）
@@ -25,14 +27,8 @@ const INTERFACE_NAMES = {
   'logi.maintenance.create': '创建维修窗口（演示工具）',
 }
 
-const FACT_NAMES = {
-  F1: '教室详情',
-  F2: '座位布局',
-  F3: '时段座位占用',
-  F4: '跨身份预约列表',
-  F5: '我的预约',
-  F6: '维修窗口',
-}
+// 事实/命题/规则的人话名不在这里写死：唯一来源是引擎的术语对照表（stores/glossary.js），
+// 查不到时它原样返回编号——比在界面里维护第二份映射诚实。
 
 const entry = computed(() => {
   const seq = Number.parseInt(String(props.event.evidenceRef).split(':')[1], 10)
@@ -49,11 +45,18 @@ const callName = computed(() => {
   return action.startsWith('contact:') ? (INTERFACE_NAMES[action.slice('contact:'.length)] ?? action) : null
 })
 
+// 依据芯片：说清"这条结论是凭什么下的"——用业务语义，不出现内部编号（零术语 P1-3）
 const basisChips = computed(() => {
   const basis = entry.value?.basis ?? []
   return basis
     .filter((b) => b.fact || b.proposition || b.rule)
-    .map((b) => (b.fact ? `事实 ${FACT_NAMES[b.fact] ?? b.fact}` : b.proposition ? `命题 ${b.proposition}` : `规则 ${b.rule}`))
+    .map((b) =>
+      b.fact
+        ? `依据 · ${glossary.factName(b.fact)}`
+        : b.proposition
+          ? `判定 · ${glossary.propositionName(b.proposition)}`
+          : `处理规则 · ${glossary.ruleName(b.rule)}`,
+    )
 })
 
 const injected = computed(() => entry.value?.metadata?.injected === true)

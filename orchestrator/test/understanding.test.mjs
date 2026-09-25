@@ -289,6 +289,30 @@ test('闸门三机械算缺：模型漏报 missing 也不影响（缺口由计�
   assert.deepEqual(outcome.clarify.missing, ['timeSegment']) // 闸门三：机械计算的缺口
 })
 
+// ---- 零术语（P1-3）：界面上的文案不许出现内部编号 -----------------------------
+
+test('零术语：理解结果的人话文案不含 intentId 与英文槽位键（界面直接显示这一句）', async () => {
+  const { chain } = await chat(
+    {},
+    [
+      {
+        intent: 'borrow-classroom',
+        slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午' },
+        confidence: 0.92,
+        outOfDomain: false,
+      },
+    ],
+    '帮我借明天下午数智楼123',
+  )
+  const entry = chain.getEntries().find((e) => e.action === 'decide:understand')
+  assert.ok(entry, '理解决策有留痕')
+  assert.match(entry.conclusion.summary, /识别为「借教室」/)
+  assert.match(entry.conclusion.summary, /教室=数智楼123/)
+  assert.match(entry.conclusion.summary, /日期=明天/)
+  // 关键断言：观众看得见的这句话里不许出现 intentId 或英文槽位键
+  assert.doesNotMatch(entry.conclusion.summary, /borrow-classroom|classroomName|datePhrase|timeSegment/)
+})
+
 // ---- C7 管理我的预约（2026-09-26 新增：查 / 退）--------------------------------
 
 // F5 的 wire 行（适配器归一化后 recordId/start/end/resourceName 与 admin 列表同形）
