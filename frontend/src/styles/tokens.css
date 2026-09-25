@@ -1,0 +1,68 @@
+/* 设计变量 —— 第 10 章 §七（Stripe 风格取向 + 深浅双主题，G6）。
+   颜色只用于表达状态；层级靠字号与留白；细描边优先于阴影。 */
+
+:root {
+  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+
+  --radius-card: 10px;
+  --radius-small: 6px;
+  --border-width: 1px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --dur-fast: 120ms;
+  --dur-slow: 240ms;
+}
+
+/* 浅色（默认） */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --border: #e3e8ee;
+  --text: #1a1f36;
+  --text-muted: #697386;
+  --text-faint: #9aa4b8;
+  --accent: #5b5bd6;
+  --accent-weak: #eeeefc;
+  --on-accent: #ffffff;
+
+  --status-success: #0e9f6e;
+  --status-success-weak: #e3f5ee;
+  --status-danger: #d92d20;
+  --status-danger-weak: #fdeceb;
+  --status-uncertain: #b54708;
+  --status-uncertain-weak: #fdf1e2;
+  --status-neutral: #697386;
+}
+
+/* 深色（投影环境风险对冲，G6） */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f131c;
+  --surface: #171d2a;
+  --surface-2: #1e2534;
+  --border: #2a3247;
+  --text: #e7eaf2;
+  --text-muted: #98a2b8;
+  --text-faint: #6b7488;
+  --accent: #8b8bf0;
+  --accent-weak: #242447;
+  --on-accent: #0f131c;
+
+  --status-success: #34c98f;
+  --status-success-weak: #12301f;
+  --status-danger: #f2746a;
+  --status-danger-weak: #3c1a18;
+  --status-uncertain: #eda23c;
+  --status-uncertain-weak: #3a2a12;
+  --status-neutral: #98a2b8;
+}
