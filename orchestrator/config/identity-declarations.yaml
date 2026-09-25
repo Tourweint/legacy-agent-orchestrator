@@ -1,0 +1,31 @@
+# =============================================================================
+# 身份声明 —— 第 13 章阶段 0 交付物 5（K4 三审拍板：独立成文件）
+#
+# 字段规格：第 13 章 §4.3。
+# 纪律：
+#   · 本文件不得出现任何凭证值（密码只写"从哪个环境变量取"）
+#   · 一个业务身份必须绑定一个具体账号（一审澄清）：同身份混用多账号会让
+#     幂等业务键的"我写的"比对漂移（第 06 章 §2.2）
+#   · 身份标识供注册表的 requiredIdentity 引用；initiator 是运行时解析的
+#     特殊取值（= 发起写入时的业务身份），不是独立身份
+# =============================================================================
+
+identities:
+
+  - id: ADMIN
+    account: admin
+    businessSemantics: 管理端身份——跨权限域事实（F4 全量预约 / F6 维修窗口）与演示工具的唯一入口
+    credentials:
+      passwordEnv: ORCH_LEGACY_ADMIN_PASSWORD
+
+  - id: TEACHER
+    account: "233"
+    businessSemantics: 主链路写入身份——教室预约提交/撤销/mine 查证；幂等业务键"身份"分量的默认取值
+    credentials:
+      passwordEnv: ORCH_LEGACY_TEACHER_PASSWORD
+
+  - id: STUDENT
+    account: abc
+    businessSemantics: 座位预约身份——D2 拍板不进入自动编排，仅纳管留档与粒度对照
+    credentials:
+      passwordEnv: ORCH_LEGACY_STUDENT_PASSWORD

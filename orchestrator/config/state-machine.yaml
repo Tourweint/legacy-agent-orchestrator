@@ -1,0 +1,151 @@
+# =============================================================================
+# 状态机转移表 —— 第 04 章 §五 的数据落地（规格 → 数据）
+#
+# 读法：未列出的 (状态 × 目的 × 事件) 组合 = 非法转移——抛错并终止任务、落 UNRESOLVED
+#       并留痕（第 04 章 §5.6），不静默通过、不就近处理。
+# 字段：
+#   purpose   缺省 = 两种目的（正向写入 / 补偿撤销）共用；forward = 仅正向；compensate = 仅补偿
+#   payload   载荷分流（仅 VERIFY_FOUND 正向语境：mine / others，第 04 章 §5.3 注三）
+#   ignore    忽略型无边（第 04 章 §5.6/§5.9）：记录一条审计后状态不变、流程继续，
+#             不是非法转移（提交中/查证中收到取消 → 取消不生效，决策 B8）
+# 硬约束（第 04 章 §六，由结构自检项 5/6 保证）：
+#   SUBMITTING 入边恰好三条（PROPOSITIONS_OK / VERIFY_NOT_FOUND / COMPENSATION_READY）；
+#   没有 CALL_* 事件直通 DONE 的边——UNKNOWN 必须先经查证。
+# 维护纪律：本表任何加边/改边必须同步第 04 章 §3.1 索引表与 §五 各分表，并走变更记录（B6：改后自检不过不允许继续开发）。
+# =============================================================================
+
+initial: IDLE
+
+states:
+  IDLE:          { class: flow }
+  UNDERSTANDING: { class: flow }
+  RESOLVING:     { class: flow }
+  GATHERING:     { class: flow }
+  VALIDATING:    { class: flow }
+  SUBMITTING:    { class: flow }
+  JUDGING:       { class: flow }
+  VERIFYING:     { class: flow }
+  DEGRADING:     { class: flow }
+  COMPENSATING:  { class: flow }
+  AWAIT_CLARIFY: { class: suspended }   # 有出边（等人输入），与终态区分（第 04 章 §3.2）
+  DONE:          { class: terminal }
+  REJECTED:      { class: terminal }
+  FAILED:        { class: terminal }
+  UNRESOLVED:    { class: terminal }
+
+purposes: [forward, compensate]
+
+events:
+  # 理解阶段（§4.1）
+  - START
+  - START_STRUCT
+  - INTENT_RESOLVED
+  - SLOTS_INCOMPLETE
+  - OUT_OF_DOMAIN
+  - UNDERSTAND_FAILED
+  - USER_REPLIED
+  - USER_CANCELLED
+  - CLARIFY_LIMIT
+  # 事实与判定阶段（§4.2）
+  - ENTITY_RESOLVED
+  - ENTITY_UNRESOLVED
+  - FACTS_READY
+  - FACT_UNAVAILABLE
+  - PROPOSITIONS_OK            # 可携带"已豁免命题清单"载荷（C17，第 04 章 §5.2 注二）
+  - PROPOSITIONS_FAILED
+  - PROPOSITIONS_UNCONFIRMED
+  - DEGRADABLE_CONFLICT
+  - CHECK_ONLY
+  - ALREADY_DONE
+  # 调用与结果阶段（§4.3）
+  - CALL_SUCCESS
+  - CALL_FAILURE
+  - CALL_UNKNOWN
+  - CALL_CONFLICT
+  - JUDGE_SUCCESS
+  - JUDGE_FAILURE
+  - ROLLBACK_NEEDED
+  # 收敛阶段（§4.4）
+  - VERIFY_FOUND               # 必须携带区分后的原因（我写的/别人写的，第 06 章 §八）
+  - VERIFY_NOT_FOUND
+  - VERIFY_INCONCLUSIVE
+  - VERIFY_LIMIT
+  - DEGRADE_ACCEPTED
+  - TARGET_CONFIRM_NEEDED
+  - DEGRADE_EXHAUSTED
+  - COMPENSATION_READY
+  - COMPENSATION_DONE
+
+edges:
+
+  # ── IDLE（恰好两条出边：自然语言 / 结构化任务，第 04 章 §5.1 注）────────────
+  - { from: IDLE, event: START,        to: UNDERSTANDING }
+  - { from: IDLE, event: START_STRUCT, to: RESOLVING }      # 无 LLM 路径（第 03 章 §十）
+
+  # ── 理解 ────────────────────────────────────────────────────────────────
+  - { from: UNDERSTANDING, event: INTENT_RESOLVED,    to: RESOLVING }
+  - { from: UNDERSTANDING, event: SLOTS_INCOMPLETE,   to: AWAIT_CLARIFY }
+  - { from: UNDERSTANDING, event: OUT_OF_DOMAIN,      to: REJECTED }
+  - { from: UNDERSTANDING, event: UNDERSTAND_FAILED,  to: REJECTED }
+  - { from: UNDERSTANDING, event: USER_CANCELLED,     to: REJECTED }
+
+  # ── 挂起态（三条出边：回复/取消/超限，第 04 章 §5.5）──────────────────────
+  - { from: AWAIT_CLARIFY, event: USER_REPLIED,   to: UNDERSTANDING }
+  - { from: AWAIT_CLARIFY, event: USER_CANCELLED, to: REJECTED }
+  - { from: AWAIT_CLARIFY, event: CLARIFY_LIMIT,  to: REJECTED }
+
+  # ── 实体消解 ─────────────────────────────────────────────────────────────
+  - { from: RESOLVING, event: ENTITY_RESOLVED,   to: GATHERING }
+  - { from: RESOLVING, event: ENTITY_UNRESOLVED, to: REJECTED }
+  - { from: RESOLVING, event: USER_CANCELLED,    to: REJECTED }   # 写请求未发出，取消=放弃（B8）
+
+  # ── 事实收集（FACT_UNAVAILABLE 进判定由命题各自处置，不在状态机层一刀切）──
+  - { from: GATHERING, event: FACTS_READY,       to: VALIDATING }
+  - { from: GATHERING, event: FACT_UNAVAILABLE,  to: VALIDATING }
+  - { from: GATHERING, event: USER_CANCELLED,    to: REJECTED }
+
+  # ── 判定（ALREADY_DONE → DONE 是幂等命中，决策 C6；UNCONFIRMED 保守拒绝）──
+  - { from: VALIDATING, event: PROPOSITIONS_OK,          to: SUBMITTING }  # SUBMITTING 入边 1/3
+  - { from: VALIDATING, event: PROPOSITIONS_FAILED,      to: REJECTED }
+  - { from: VALIDATING, event: PROPOSITIONS_UNCONFIRMED, to: REJECTED }
+  - { from: VALIDATING, event: DEGRADABLE_CONFLICT,      to: DEGRADING }
+  - { from: VALIDATING, event: CHECK_ONLY,               to: DONE }
+  - { from: VALIDATING, event: ALREADY_DONE,             to: DONE }
+  - { from: VALIDATING, event: USER_CANCELLED,           to: REJECTED }
+
+  # ── 提交（唯一副作用出口；三值在接触层已定，这里只分流）────────────────────
+  - { from: SUBMITTING, event: CALL_SUCCESS,  to: JUDGING }
+  - { from: SUBMITTING, event: CALL_FAILURE,  to: JUDGING }
+  - { from: SUBMITTING, event: CALL_UNKNOWN,  to: VERIFYING }   # UNKNOWN/歧义不经过 JUDGING
+  - { from: SUBMITTING, event: CALL_CONFLICT, to: VERIFYING }
+  - { from: SUBMITTING, event: USER_CANCELLED, ignore: true }   # 请求已发出，取消不生效（B8）→ 审计留痕
+
+  # ── 结果定性（"目的"第三维：同一事件两种目的去向不同，第 04 章 §5.7）───────
+  - { from: JUDGING, event: JUDGE_SUCCESS, purpose: forward,    to: DONE }
+  - { from: JUDGING, event: JUDGE_FAILURE, purpose: forward,    to: FAILED }
+  - { from: JUDGING, event: ROLLBACK_NEEDED, purpose: forward,  to: COMPENSATING }   # 多步写入回滚（D7）
+  - { from: JUDGING, event: DEGRADABLE_CONFLICT, purpose: forward, to: DEGRADING }
+  - { from: JUDGING, event: JUDGE_SUCCESS, purpose: compensate, to: COMPENSATING }   # 撤销成功→清单下一项；空则落 FAILED
+  - { from: JUDGING, event: JUDGE_FAILURE, purpose: compensate, to: UNRESOLVED }     # 撤销失败=副作用未收敛，不得落 FAILED
+  - { from: JUDGING, event: USER_CANCELLED, ignore: true }
+
+  # ── 查证收敛（VERIFY_NOT_FOUND → SUBMITTING 是唯一回到副作用的边=M4 的结构表达）──
+  - { from: VERIFYING, event: VERIFY_FOUND, purpose: forward, payload: mine,   to: DONE }       # 幂等命中（C6）
+  - { from: VERIFYING, event: VERIFY_FOUND, purpose: forward, payload: others, to: REJECTED }   # 别人占了；不降级（J1 拍板）
+  - { from: VERIFYING, event: VERIFY_FOUND, purpose: compensate,               to: COMPENSATING } # 撤销已生效
+  - { from: VERIFYING, event: VERIFY_NOT_FOUND, purpose: forward,   to: SUBMITTING }  # 确定未生效才允许重试
+  - { from: VERIFYING, event: VERIFY_NOT_FOUND, purpose: compensate, to: SUBMITTING }  # 重试撤销，上限 1 次（D8）
+  - { from: VERIFYING, event: VERIFY_INCONCLUSIVE, to: UNRESOLVED }  # 查不清=查证后仍 UNKNOWN，落 UNRESOLVED
+  - { from: VERIFYING, event: VERIFY_LIMIT,        to: UNRESOLVED }  # 查证次数超限（正向 2 / 补偿 1）
+  - { from: VERIFYING, event: USER_CANCELLED, ignore: true }
+
+  # ── 降级（DEGRADE_ACCEPTED → GATHERING：换方案后事实必须从零重取，第 04 章 §5.4 注一）──
+  - { from: DEGRADING, event: DEGRADE_ACCEPTED,       to: GATHERING }
+  - { from: DEGRADING, event: TARGET_CONFIRM_NEEDED,  to: AWAIT_CLARIFY }   # 换时段须用户确认；不消耗追问轮次
+  - { from: DEGRADING, event: DEGRADE_EXHAUSTED,      to: REJECTED }
+  - { from: DEGRADING, event: USER_CANCELLED,         to: REJECTED }
+
+  # ── 补偿（COMPENSATION_READY → SUBMITTING：补偿撤销与正向共用同一提交机制）──
+  - { from: COMPENSATING, event: COMPENSATION_READY, to: SUBMITTING }       # SUBMITTING 入边 3/3
+  - { from: COMPENSATING, event: COMPENSATION_DONE,  to: FAILED }           # 失败但已收敛
+  - { from: COMPENSATING, event: USER_CANCELLED, ignore: true }             # 补偿一旦开始禁止中断（I6）

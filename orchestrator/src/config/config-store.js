@@ -1,0 +1,224 @@
+// 配置访问入口 —— 第 02 章 §八（二审澄清）：编排层等业务逻辑必须经本入口读取配置数据，
+// 不得自行读文件再解析。收益：数据完整性可被自检、换格式只改一处。
+// 校验范围是"结构完整性"（缺文件/缺字段/悬空引用）；设计不变量（8 条自检）由 scripts/structure-check.mjs 负责。
+
+import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
+import { parse as parseYaml } from 'yaml'
+
+const DEFAULT_CONFIG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'config')
+
+const REQUIRED_INTERFACE_FIELDS = [
+  'id', 'domain', 'method', 'path', 'purpose', 'requiredIdentity', 'sideEffect',
+  'autoOrchestration', 'idempotentBusinessKey', 'verification', 'compensation',
+  'preconditions', 'adapter', 'legacyNotes',
+]
+
+const VALID_DOMAINS = ['auth', 'edu', 'logi']
+const SPECIAL_IDENTITIES = ['none', 'initiator'] // initiator = 发起写入时的业务身份（注册表口径，一审更正）
+
+export class ConfigError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'ConfigError'
+  }
+}
+
+function readYamlFile(dir, name) {
+  const path = join(dir, name)
+  if (!existsSync(path)) {
+    throw new ConfigError(`配置文件缺失: ${path}`)
+  }
+  try {
+    return parseYaml(readFileSync(path, 'utf8'))
+  } catch (err) {
+    throw new ConfigError(`配置文件解析失败: ${path} —— ${err.message}`)
+  }
+}
+
+export class ConfigStore {
+  constructor(dir = process.env.ORCH_CONFIG_DIR || DEFAULT_CONFIG_DIR) {
+    this.constants = readYamlFile(dir, 'constants.yaml')
+    this.registry = readYamlFile(dir, 'interface-registry.yaml')
+    this.plans = readYamlFile(dir, 'intent-plans.yaml')
+    this.identities = readYamlFile(dir, 'identity-declarations.yaml')
+    this.stateMachine = readYamlFile(dir, 'state-machine.yaml')
+    this.#validate()
+  }
+
+  // ---- 语义化查询 ----
+
+  getInterface(id) {
+    const found = this.interfaces.find((it) => it.id === id)
+    if (!found) throw new ConfigError(`接口未纳管: ${id}`)
+    return found
+  }
+
+  get allInterfaces() {
+    return this.interfaces
+  }
+
+  getIntent(id) {
+    const found = this.intentList.find((it) => it.id === id)
+    if (!found) throw new ConfigError(`意图未登记: ${id}`)
+    return found
+  }
+
+  get intentList() {
+    return this.plans.intents
+  }
+
+  getConstants() {
+    return this.constants
+  }
+
+  getStateMachine() {
+    return this.stateMachine
+  }
+
+  getIdentity(id) {
+    const found = this.identityList.find((it) => it.id === id)
+    if (!found) throw new ConfigError(`身份未声明: ${id}`)
+    return found
+  }
+
+  get identityList() {
+    return this.identities.identities
+  }
+
+  // 意图计划被允许引用的接口集合（自动编排白名单）
+  listAutoOrchestrationAllowed() {
+    return this.interfaces.filter((it) => it.autoOrchestration === true).map((it) => it.id)
+  }
+
+  // ---- 结构完整性校验（缺必填字段 = 缺陷，第 13 章 §四 纪律 2）----
+
+  #validate() {
+    this.#validateRegistry()
+    this.#validatePlans()
+    this.#validateIdentities()
+    this.#validateStateMachine()
+  }
+
+  #validateRegistry() {
+    const list = this.registry.interfaces
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new ConfigError('接口注册表为空')
+    }
+    const seen = new Set()
+    for (const it of list) {
+      const missing = REQUIRED_INTERFACE_FIELDS.filter((f) => !(f in it))
+      if (missing.length > 0) {
+        throw new ConfigError(`接口 ${it.id || '(无 id)'} 缺字段: ${missing.join(', ')}`)
+      }
+      if (seen.has(it.id)) throw new ConfigError(`接口标识重复: ${it.id}`)
+      seen.add(it.id)
+      if (!VALID_DOMAINS.includes(it.domain)) {
+        throw new ConfigError(`接口 ${it.id} 域非法: ${it.domain}`)
+      }
+      if (typeof it.sideEffect !== 'boolean' || typeof it.autoOrchestration !== 'boolean') {
+        throw new ConfigError(`接口 ${it.id} 的 sideEffect/autoOrchestration 必须是布尔值`)
+      }
+      if (it.sideEffect) {
+        // N3 硬门槛：有副作用必须可查证
+        if (!it.verification || !it.verification.via) {
+          throw new ConfigError(`接口 ${it.id} 有副作用但无查证路径（N3 硬门槛）`)
+        }
+        // N4 硬门槛：有副作用必须可补偿或显式登记为不可补偿
+        const comp = it.compensation
+        const declared = comp && (comp.action || comp.nonCompensable === true)
+        if (!declared) {
+          throw new ConfigError(`接口 ${it.id} 有副作用但既无补偿动作也未登记不可补偿（N4 硬门槛）`)
+        }
+        // 幂等业务键：补偿动作可豁免（businessKeyExempt）
+        if (!it.businessKeyExempt && !it.idempotentBusinessKey) {
+          throw new ConfigError(`接口 ${it.id} 有副作用但缺幂等业务键（补偿动作可豁免）`)
+        }
+      }
+      if (!Array.isArray(it.legacyNotes) || it.legacyNotes.length === 0) {
+        throw new ConfigError(`接口 ${it.id} 缺实测注意事项——它们是文档的一部分，禁止为空`)
+      }
+    }
+    this.interfaces = list
+  }
+
+  #validatePlans() {
+    const intents = this.plans.intents
+    if (!Array.isArray(intents) || intents.length === 0) {
+      throw new ConfigError('意图计划为空')
+    }
+    const ids = new Set()
+    for (const intent of intents) {
+      for (const f of ['id', 'name', 'readOnly', 'slots', 'propositions', 'steps']) {
+        if (!(f in intent)) throw new ConfigError(`意图 ${intent.id || '(无 id)'} 缺字段: ${f}`)
+      }
+      if (ids.has(intent.id)) throw new ConfigError(`意图标识重复: ${intent.id}`)
+      ids.add(intent.id)
+      if (intent.steps.some((s) => !s.interface)) {
+        throw new ConfigError(`意图 ${intent.id} 存在未声明接口的步骤`)
+      }
+    }
+    // 引用完整性：步骤/查证/补偿引用的接口必须已纳管（自检项 8 依赖此处干净的引用面）
+    for (const intent of intents) {
+      const refs = [
+        ...intent.steps.map((s) => s.interface),
+        ...(intent.verification
+          ? [intent.verification.primary?.interface, intent.verification.fallback?.interface]
+          : []),
+        intent.compensation?.action,
+      ].filter(Boolean)
+      for (const ref of refs) {
+        if (!this.interfaces.some((it) => it.id === ref)) {
+          throw new ConfigError(`意图 ${intent.id} 引用了未纳管接口: ${ref}`)
+        }
+      }
+    }
+  }
+
+  #validateIdentities() {
+    const list = this.identityList
+    const ids = new Set(list.map((it) => it.id))
+    for (const identity of list) {
+      if (!identity.account) throw new ConfigError(`身份 ${identity.id} 缺绑定账号`)
+      if (!identity.credentials?.passwordEnv) {
+        throw new ConfigError(`身份 ${identity.id} 缺凭证环境变量名（只写变量名，不写值）`)
+      }
+    }
+    for (const it of this.interfaces) {
+      const required = it.requiredIdentity
+      if (SPECIAL_IDENTITIES.includes(required)) continue
+      if (!ids.has(required)) {
+        throw new ConfigError(`接口 ${it.id} 所需身份未声明: ${required}`)
+      }
+    }
+  }
+
+  #validateStateMachine() {
+    const sm = this.stateMachine
+    const stateIds = new Set(Object.keys(sm.states || {}))
+    if (!stateIds.has(sm.initial)) {
+      throw new ConfigError(`状态机初始态未定义: ${sm.initial}`)
+    }
+    const events = new Set(sm.events || [])
+    for (const edge of sm.edges || []) {
+      if (!stateIds.has(edge.from)) throw new ConfigError(`转移表边的 from 未定义: ${edge.from}`)
+      if (!events.has(edge.event)) throw new ConfigError(`转移表边的事件未登记: ${edge.event}`)
+      if (edge.ignore) {
+        // 忽略型无边（第 04 章 §5.6/§5.9）：设计上不生效的事件，状态不变、仅审计留痕——
+        // 它没有也不应该有目标状态
+        if (edge.to) {
+          throw new ConfigError(`忽略型无边不应有目标状态: ${edge.from} --${edge.event}--> ${edge.to}`)
+        }
+        continue
+      }
+      if (!stateIds.has(edge.to)) {
+        throw new ConfigError(`转移表边的 to 未定义: ${edge.from} --${edge.event}--> ${edge.to}`)
+      }
+      if (edge.purpose && !(sm.purposes || []).includes(edge.purpose)) {
+        throw new ConfigError(`转移表边的 purpose 非法: ${edge.purpose}`)
+      }
+    }
+  }
+}

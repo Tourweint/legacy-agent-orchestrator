@@ -1,0 +1,78 @@
+# =============================================================================
+# 意图计划 —— 第 13 章阶段 0 交付物 4（K4 三审拍板：独立成文件）
+#
+# 字段规格：第 13 章 §4.2。意图闭集与理解层输出同源（第 03 章 闸门一；
+# 当前闭集：借教室、查询教室可用性——新增意图 = 本文件加一节）。
+# 纪律：
+#   · 步骤链只能引用 autoOrchestration: true 的接口（结构自检项 8）
+#   · 槽位缺口 = 必填槽位 − 已提供键，由编排层机械计算（闸门三），不采信模型
+#   · P-NOT-ALREADY-MINE 判定顺序在 P-SLOT-FREE 之前（第 06 章 §四：先本人后占用）
+# =============================================================================
+
+intents:
+
+  # ── 主链路：借教室 ────────────────────────────────────────────────────────
+  - id: borrow-classroom
+    name: 借教室
+    readOnly: false
+    # D7（决策汇总 §四）：一次借两间教室是合法输入——多资源由编排层按计划顺序
+    # 组合多次运行，每运行承载一个资源生命周期（第 04 章 §5.8）
+    multiResource: true
+    slots:
+      required: [classroomName, datePhrase, timeSegment]
+      optional: [reason]          # 缺省值的业务口径未定——实现时确定并登记（第 03 章 §8.1：须标注"按默认处理"）
+    facts: [F1, F3, F4, F5, F6]   # F2 不在主链路（第 01 章 §6.1 ③）
+    propositions:
+      - P-CLASSROOM-EXISTS
+      - P-CLASSROOM-ENABLED
+      - P-NOT-ALREADY-MINE        # 先查本人（幂等命中 → ALREADY_DONE → DONE，决策 C6）
+      - P-SLOT-FREE
+      - P-NOT-UNDER-MAINTENANCE
+    steps:
+      - { step: resolve-classroom,  interface: edu.classroom.detail,            serves: "F1 + 实体消解" }
+      - { step: occupied-seats,     interface: edu.classroom.reservedSeats,     serves: F3 }
+      - { step: admin-reservations, interface: logi.reservation.list,           serves: "F4（不带 keyword，拉全量）" }
+      - { step: my-reservations,    interface: edu.reservation.mine,            serves: "F5（发起时身份）" }
+      - { step: maintenance-list,   interface: logi.maintenance.list,           serves: "F6（ADMIN，跨权限域）" }
+      - { step: submit-reservation, interface: edu.reservation.classroom.create, serves: "提交（唯一写出口，仅 SUBMITTING 态发出）" }
+    verification:
+      # 三条路径与优先级：第 06 章 §五（首选 ADMIN 全量列表；降级 mine 须交叉印证）
+      primary:  { interface: logi.reservation.list, identity: ADMIN }
+      fallback: { interface: edu.reservation.mine,  identity: initiator }
+      predicate:
+        forward:    "Q1 + Q2 同时成立才判幂等命中：写入者=发起身份 且 时段严格重叠（第 06 章 §三）"
+        compensate: "按 recordId 定位：CANCELLED/EXPIRED/查无此 id 均判'撤销已生效'（第 06 章 §8.1）"
+    compensation:
+      action: edu.reservation.cancel
+      # recordId 不可得（如提交时响应丢失）→ 不得猜，直接 VERIFY_INCONCLUSIVE（第 06 章 §8.1）
+      recordIdRequired: true
+      listNotPersisted: true    # K3 三审拍板：补偿清单不持久化，随任务销毁
+    degrade:
+      candidatesFrom: edu.classroom.available
+      # available_list 只是候选池（无时间参数），每项仍逐项走完整命题校验；
+      # 候选上限/轮次/不降容量等数值全部来自 constants.yaml 的 degrade 节
+      note: 用户未指定具体教室时不进入降级（没有同楼栋与不降容量的基准，第 08 章 §8.1）
+    # 用户取消仅写请求发出前生效（B8）；提交后取消为忽略型无边（第 04 章 §5.9）
+
+  # ── 只读意图：查询教室可用性 ─────────────────────────────────────────────
+  - id: query-classroom-availability
+    name: 查询教室可用性
+    readOnly: true              # 决定终态是 DONE（CHECK_ONLY），不进入提交
+    multiResource: false
+    slots:
+      required: [classroomName, datePhrase, timeSegment]
+      optional: []
+    facts: [F1, F3, F4, F6]
+    propositions:
+      - P-CLASSROOM-EXISTS
+      - P-CLASSROOM-ENABLED
+      - P-SLOT-FREE
+      - P-NOT-UNDER-MAINTENANCE   # 无写入，无 P-NOT-ALREADY-MINE
+    steps:
+      - { step: resolve-classroom,  interface: edu.classroom.detail,          serves: "F1 + 实体消解" }
+      - { step: occupied-seats,     interface: edu.classroom.reservedSeats,   serves: F3 }
+      - { step: admin-reservations, interface: logi.reservation.list,         serves: F4 }
+      - { step: maintenance-list,   interface: logi.maintenance.list,         serves: F6 }
+    verification: null
+    compensation: null
+    degrade: null                 # 查询无降级：被占/检修都如实答复，不"换一间替你问"

@@ -1,0 +1,93 @@
+# =============================================================================
+# 常量集合 —— 第 13 章阶段 0 交付物 2
+#
+# 权威值来源：docs/设计方案/2026-09-25-方案待决项决策汇总.md（唯一权威来源）；
+# 实测出处：docs/变更记录/2026-09-25-架构三审-开工Gate关闭与实测回填.md。
+# 纪律（第 02 章 §八）：业务逻辑禁止硬编码这些值，一律经配置访问入口读取。
+# =============================================================================
+
+# ---- 时间口径（K2 三审拍板；第 08 章 §7.2 / 第 06 章 §六）----
+time:
+  # 部署地时区锚点：模糊时间表达（"下午""下周三"）按此时区的墙钟解释，
+  # 推出后立即转绝对时刻；此后全链路不再出现"本地时区"概念（第 06 章 §6.3 规格 5）
+  deployTimeZone:
+    name: Asia/Shanghai
+    offsetMinutes: 480          # UTC+8
+  # 三段区间（部署地墙钟；存量系统无节次表/节次枚举，C19 实测定论，
+  # 归一化只到"上午/下午/晚上"三段，不精确到节；演示脚本定稿前可调，须走变更记录）
+  segments:
+    morning:   { start: "08:00", end: "12:00" }
+    afternoon: { start: "13:00", end: "17:00" }
+    evening:   { start: "18:00", end: "22:00" }
+  # 存量系统可预约时段（实测 system_config，J4）：归一化结果必须落在其中
+  legacyBookableWindow: { start: "07:00", end: "22:30" }
+
+# ---- 预约记录状态集合（J3 三审实测；第 08 章 §2.2）----
+# 枚举仅 ACTIVE/CANCELLED/EXPIRED；生效中 = 仅 ACTIVE；
+# 已撤销记录仍留存于全量列表（条数不减），比对前必须过滤
+reservationStates:
+  active: [ACTIVE]
+  invalid: [CANCELLED, EXPIRED]   # EXPIRED 由定时任务每 60s 将 end_time 已过的 ACTIVE 置位
+
+# ---- 维修窗口失效集合（C4 三审实测）----
+# 实测枚举仅 ACTIVE/CANCELLED，失效集实测为 {CANCELLED}；
+# 其余为向前兼容的防御性扩展（出现即拦：多拦可逆，漏放不可逆，第 08 章 §2.2 F6）
+maintenanceInvalidStates: [CANCELLED, CANCELED, FINISHED, EXPIRED, CLOSED]
+
+# ---- 教室 status 启用判定集（C1 三审实测 + 防御口径）----
+# 实测 7 间全部 ENABLED、无空值；"未标注视为启用"保留为防御口径
+# （第 08 章 P-CLASSROOM-ENABLED：可用性另由时段占用与维修窗口兜底，空字段不拥有否决权）
+classroomEnabledStates: [AVAILABLE, ENABLED, NORMAL, ""]
+
+# ---- 时段重叠口径（C8 三审实测：不含边界）----
+slotOverlap:
+  # 已有.start < 申请.end AND 已有.end > 申请.start（严格不等号，与存量冲突 SQL 对齐）
+  # 边界相等不算重叠：紧邻预约（上一场 14:00 结束、下一场 14:00 开始）是允许的
+  strictInequality: true
+
+# ---- 查证与安全阈值 ----
+verification:
+  # 全量列表安全阈值（C5）：它是性能护栏，不是已实测的截断点（第 06 章 §五.4）——
+  # 超阈仍做比对，仅"未命中"时降级为"查不清"，绝不允许降级为"未生效"
+  listSafetyThreshold: 500
+  # 正向查证次数上限（第 04 章 §七）：两次仍不确定，落 UNRESOLVED
+  forwardAttempts: 2
+  # 补偿重试上限（D8）：撤销通常只有"能撤/不能撤"两种结果，重试撤销至多 1 次
+  compensateRetries: 1
+
+# ---- 循环上限（第 04 章 §七；K1 三审拍板 60）----
+# 任何循环都必须有具体数字上限；总步数是防死循环的最后防线
+limits:
+  formatRetries: 2        # 理解层格式重试（最多 3 次总调用，第 03 章 §5.4）
+  clarifyRounds: 3        # 追问轮次（E3）；换时段确认不消耗该额度（第 04 章 §5.5 注）
+  degradeRounds: 3        # 降级轮次（B1）：覆盖"换教室/换时段/两者都换"
+  taskTotalSteps: 60      # 任务总步数（K1 三审拍板：理论上界 46，保留诊断余量；
+                          # 一次状态转移算一步，多资源任务跨运行累计，第 04 章 §5.8）
+
+# ---- 降级候选 ----
+degrade:
+  # 候选池上限（C2 三审实测：数智楼全栋 5 间，扣除主角后候选池天然 ≤ 4，K=5 留余量）
+  candidateLimit: 5
+  noCapacityDown: true              # 禁止降级容量——那不是降级，是违背诉求（第 08 章 §8.1）
+  sameBuildingFirst: true           # 同楼栋优先（原教室即基准；未指定教室不进入降级）
+  timeChangeNeedsUserConfirm: true  # 换时段必须用户确认（TARGET_CONFIRM_NEEDED → AWAIT_CLARIFY）
+  # F4 快照口径（J6 三审拍板）：每验证轮拉取一次、轮内候选共用；跨轮必须重拉
+  factsResnapshotPerRound: true
+
+# ---- 调用超时（B3 三审样本：admin 列表 86 行 avg 14ms / max 17ms → 初值；实现期以更大样本复标）----
+timeoutsMs:
+  write: 3000           # 写接口 3s（约 150 倍余量；写超时 = UNKNOWN，必须查证）
+  read: 3000            # 读接口默认
+  readHeavyList: 5000   # 全量列表类读接口（无分页参数，数据量随演示增长时放宽）
+
+# ---- 证据层 ----
+evidence:
+  # 原始响应片段保留长度（C16，需实测；倾向 500 字符，先剔除凭证字段再截断）
+  rawFragmentMaxLength: 500
+  # 凭证字段名黑名单（导出/留痕前剔除，大小写不敏感；第 05 章 §八：evidence 不得包含凭证）
+  redactFieldPatterns: [token, authorization, password, secret, credential]
+
+# ---- 理解层 ----
+understanding:
+  # 置信度阈值（E1 需实测；倾向 0.55，阶段 5 用样本标定后回填）
+  confidenceThreshold: 0.55
