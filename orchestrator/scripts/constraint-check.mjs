@@ -27,6 +27,17 @@ const SERVER_IMPORT_ALLOWLIST = new Set([join('src', 'access')])
 // 约束 C：LLM 用法放行目录（阶段 5 起为 src/understanding）
 const LLM_ALLOWLIST = new Set([join('src', 'understanding')])
 
+// 约束 A：出站请求写法（只允许出现在 HTTP_EXIT_ALLOWLIST）
+const OUTBOUND_CLIENT_PATTERN =
+  /\bfetch\s*\(|require\(['"]http|axios|XMLHttpRequest|\bundici\b|https?\.(get|post|put|delete|request)\s*\(/
+// 约束 A：服务端监听写法（node:http 只允许出现在接入层）
+const SERVER_IMPORT_PATTERN = /node:http\b/
+// 约束 A：存量系统地址字面量（必须来自 constants.yaml）
+const LEGACY_ADDRESS_PATTERN = /localhost:8080|127\.0\.0\.1:8080|ORCH_LEGACY_BASE_URL/
+// 约束 C：大模型客户端写法（只允许出现在 LLM_ALLOWLIST）
+const LLM_CLIENT_PATTERN =
+  /dashscope|openai|anthropic|chat\.completions|completions\/|model\.generate|generateContent/i
+
 function listFiles(dir) {
   const out = []
   for (const name of readdirSync(dir)) {
@@ -68,6 +79,8 @@ function main() {
     const lines = readFileSync(file, 'utf8').split('\n')
     lines.forEach((line, i) => {
       const loc = `${rel}:${i + 1}`
+      // 纯注释行不参与判否：注释里描述约束（如"需要 DASHSCOPE_API_KEY"）不等于在代码里使用它
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return
       if (OUTBOUND_CLIENT_PATTERN.test(line) && !HTTP_EXIT_ALLOWLIST.has(relKey)) {
         httpViolations.push(`${loc} —— 出站请求写法出现在唯一出口之外: ${line.trim().slice(0, 80)}`)
       }

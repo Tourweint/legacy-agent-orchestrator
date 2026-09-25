@@ -2,7 +2,7 @@
   "name": "orchestrator",
   "version": "0.1.0",
   "private": true,
-  "description": "面向存量业务系统的 AI 任务编排平台 —— 编排引擎（按第 13 章 9 阶段推进，当前：阶段 0）",
+  "description": "面向存量业务系统的 AI 任务编排平台 —— 编排引擎（第 13 章 9 阶段，0–8 已完成）",
   "type": "module",
   "engines": {
     "node": ">=20"
