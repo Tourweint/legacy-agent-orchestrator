@@ -54,6 +54,7 @@ export class TaskMachine {
       // 最后防线：表驱动理论无环，但"理论上"不足以让人放心（第 04 章 §七）
       const breach = new OrchestrationError(`任务步数达到上限 ${this.maxSteps}，强制停止`)
       this.evidenceChain?.record({
+        phase: 'P6',
         action: 'audit:step-budget-exhausted',
         input: { steps: this.steps, maxSteps: this.maxSteps, from: this.state, event },
         basis: [{ spec: 'constants.yaml#limits.taskTotalSteps' }],
@@ -81,6 +82,7 @@ export class TaskMachine {
     if (edge.ignore) {
       // 忽略型无边：设计上不生效的事件——记录一条审计后继续当前流程（§5.6/§5.9）
       this.evidenceChain?.record({
+        phase: 'P6',
         action: `audit:ignored-event`,
         input: { state: this.state, event, purpose: this.purpose },
         basis: [{ spec: 'state-machine.yaml#ignore' }],

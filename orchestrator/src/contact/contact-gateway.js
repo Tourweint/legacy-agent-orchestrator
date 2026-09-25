@@ -39,13 +39,16 @@ export class ContactGateway {
    * 发起一次对存量系统的逻辑调用（全系统唯一入口）。
    * @param {string} interfaceId  注册表接口标识
    * @param {object} params       语义化参数（绝对时刻用 Date；见 adapters 的参数契约）
-   * @param {{initiatorIdentity?: string}} [options] requiredIdentity=initiator 的接口必须提供发起时身份
+   * @param {{initiatorIdentity?: string, evidenceChain?: object, phase?: string}} [options]
+   *        evidenceChain：按任务覆盖证据链（阶段 4：每任务一条链，网关其余状态共享）；
+   *        phase：轨迹阶段标记（P2 事实 / P3 提交 / P4 查证 / P5 恢复），随证据条目留档
    * @returns {Promise<{interfaceId: string, verdict: 'SUCCESS'|'FAILURE'|'UNKNOWN',
    *    reasonCode: string, ambiguous: boolean, retryable: boolean, elapsedMs: number,
    *    data: *, ruleRow: string|null, evidenceRef: {taskId: string, seq: number}|null, note?: string,
    *    factUnavailable?: boolean}>}
    */
-  async call(interfaceId, params = {}, { initiatorIdentity } = {}) {
+  async call(interfaceId, params = {}, { initiatorIdentity, evidenceChain, phase } = {}) {
+    const chain = evidenceChain ?? this.evidenceChain
     const iface = this.store.getInterface(interfaceId)
     const kind = iface.sideEffect ? 'write' : 'read'
     const timeoutClass = iface.timeoutClass ?? (kind === 'write' ? 'write' : 'read')
@@ -113,6 +116,7 @@ export class ContactGateway {
       finalOutcome.verdict === 'SUCCESS' ? this.adapters.normalizeData(iface, signals.data) : undefined
 
     const evidenceRef = this.#recordEvidence({
+      chain,
       iface,
       wire,
       params,
@@ -120,6 +124,7 @@ export class ContactGateway {
       signals,
       finalOutcome,
       elapsedMs,
+      phase,
     })
 
     // 结果对象只含三值结论与语义数据——协议级信号绝不外泄（第 13 章 阶段 1 契约）
@@ -142,8 +147,8 @@ export class ContactGateway {
    * 判定依据落证据链（I4/P6）：依据=命中的规则行号；附加档=协议级信号+清洗后的响应片段。
    * 原始片段先剔凭证形态再截断（C16）；登录响应整段跳过（其体内有 token）。
    */
-  #recordEvidence({ iface, wire, params, attempt, signals, finalOutcome, elapsedMs }) {
-    if (!this.evidenceChain) return null
+  #recordEvidence({ chain, iface, wire, params, attempt, signals, finalOutcome, elapsedMs, phase }) {
+    if (!chain) return null
     let rawFragment = ''
     if (signals.transportKind === 'response' && !FRAGMENT_SKIPPED_INTERFACES.has(iface.id)) {
       rawFragment = scrubTextSecrets(String(signals.bodyText ?? '')).slice(
@@ -151,7 +156,7 @@ export class ContactGateway {
         this.store.getConstants().evidence?.rawFragmentMaxLength ?? 500,
       )
     }
-    const entry = this.evidenceChain.record({
+    const entry = chain.record({
       action: `contact:${iface.id}`,
       input: { method: wire.method, path: wire.path, params, attempt },
       basis: finalOutcome.ruleRow ? [{ rule: finalOutcome.ruleRow }] : [{ detail: '规则表未列出，保守兜底 UNKNOWN' }],
@@ -167,8 +172,20 @@ export class ContactGateway {
         rawFragment,
         elapsedMs,
       },
+      ...(phase ? { phase } : {}),
     })
     return { taskId: entry.taskId, seq: entry.seq }
+  }
+
+  /** 阶段 4：为单个任务派生网关视图——传输/身份池/适配器共享，证据链独立。 */
+  forTask(evidenceChain) {
+    return new ContactGateway({
+      configStore: this.store,
+      transport: this.transport,
+      identityPool: this.pool,
+      adapters: this.adapters,
+      evidenceChain,
+    })
   }
 }
 

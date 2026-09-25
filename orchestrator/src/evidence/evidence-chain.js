@@ -38,6 +38,16 @@ export class EvidenceChain {
   #seq
   #entries
   #modelOutputs
+  #listeners = new Set()
+
+  /**
+   * 追加监听（阶段 4：事件流"边执行边推送"的管线）。每落一条证据，监听器立即收到该条目。
+   * 监听器不得修改条目、不得抛错影响任务执行（由调用方保证）。
+   */
+  onAppend(fn) {
+    this.#listeners.add(fn)
+    return () => this.#listeners.delete(fn)
+  }
 
   /**
    * 记录一条结构化结果（进证据链）。有后果的动作必须携带依据，缺失即报错（契约①）。
@@ -52,8 +62,10 @@ export class EvidenceChain {
    *                                   结论：唯一确定的 outcome + 面向用户/证据的一句话
    * @param {*}      [entry.metadata] 附加档位（如协议级信号与已清洗的原始响应片段）；
    *                                   仅随证据条目留档，不参与判定（阶段 1 增补）
+   * @param {string} [entry.phase]    轨迹阶段标记（P1–P6，与第 10 章 §6.3 事件流同源；
+   *                                   阶段 4 增补——界面想看的信息补在证据链上，§6.1）
    */
-  record({ action, input, basis, conclusion, metadata }) {
+  record({ action, input, basis, conclusion, metadata, phase }) {
     if (!action) throw new EvidenceError('证据条目缺 action')
     if (!Array.isArray(basis) || basis.length === 0) {
       // 为什么强制：I4——"为什么做了这一步"必须永远可回答；没有依据的动作不允许发生
@@ -86,8 +98,16 @@ export class EvidenceChain {
       basis: this.redactor.redact(basis),
       conclusion: this.redactor.redact(conclusion),
       ...(metadata !== undefined ? { metadata: this.redactor.redact(metadata) } : {}),
+      ...(phase ? { phase } : {}),
     }
     this.#entries.push(entry)
+    for (const fn of this.#listeners) {
+      try {
+        fn(entry)
+      } catch {
+        // 监听器异常不阻断任务执行（推送是展示管线，不是流程的一部分）
+      }
+    }
     return entry
   }
 

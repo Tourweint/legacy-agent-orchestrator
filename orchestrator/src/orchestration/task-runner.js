@@ -123,6 +123,7 @@ export class TaskRunner {
     }))
     const conclusion = this.#conclusion(terminal, results, taskContext)
     const evidenceRef = this.evidenceChain?.record({
+      phase: 'P6',
       action: 'task-terminal',
       input: { terminal, steps: machine.steps },
       // 终态结论的依据 = 最后一条任务决策（判定/查证/降级/补偿），形成可回溯链条
@@ -144,6 +145,7 @@ export class TaskRunner {
   #forceUnresolved({ machine, taskContext, err, results }) {
     machine.state = 'UNRESOLVED' // 保守登记：按最保守方式收场，不猜测所处状态
     this.evidenceChain?.record({
+      phase: 'P6',
       action: 'task-force-unresolved',
       input: { from: machine.state, error: err.message, steps: machine.steps },
       basis: [{ spec: 'state-machine.yaml' }],

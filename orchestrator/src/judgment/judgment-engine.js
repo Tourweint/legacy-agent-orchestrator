@@ -281,6 +281,7 @@ export class JudgmentEngine {
     for (const r of results) {
       if (r.conclusion === 'NOT_APPLICABLE') continue
       this.evidenceChain.record({
+        phase: 'P2',
         action: `judge:${r.id}`,
         input: { mode: r.mode },
         basis: r.basis,

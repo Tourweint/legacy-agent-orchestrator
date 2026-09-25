@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "start": "node src/access/main.js",
     "test": "node --test \"test/*.test.mjs\"",
     "check": "node scripts/structure-check.mjs && node scripts/constraint-check.mjs"
   },

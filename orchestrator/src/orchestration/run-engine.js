@@ -65,7 +65,7 @@ export class RunEngine {
     const r = await this.gateway.call(intent.degrade.candidatesFrom, {
       building: classroom.building,
       minCapacity: 0,
-    })
+    }, { phase: 'P2' })
     if (r.verdict !== 'SUCCESS') {
       taskContext.outcome = { message: '暂时无法查询教室列表，未能解析您说的教室。' }
       machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'query-failed' } })
@@ -125,6 +125,7 @@ export class RunEngine {
     const s = judgment.summary
     const decide = (eventName, ids, message) =>
       this.#decide(taskContext, {
+        phase: 'P2',
         action: `decide:${eventName}`,
         input: { ids },
         basis: ids.map((id) => ({ proposition: id })),
@@ -187,7 +188,7 @@ export class RunEngine {
         start: taskContext.slot.start,
         end: taskContext.slot.end,
         ...(taskContext.reason ? { reason: taskContext.reason } : {}),
-      })
+      }, { phase: 'P3' })
       taskContext.lastCall = r
       if (r.verdict === 'SUCCESS') {
         const recordId = r.data?.recordId ?? null
@@ -211,7 +212,7 @@ export class RunEngine {
     const r = await this.gateway.call(
       intent.compensation.action,
       { recordId: item.recordId },
-      { initiatorIdentity: item.identityId },
+      { initiatorIdentity: item.identityId, phase: 'P5' },
     )
     taskContext.lastCall = r
     this.#fireCallOutcome(machine, r, { recordId: item.recordId })
@@ -256,6 +257,7 @@ export class RunEngine {
         identity: taskContext.identity,
       })
       this.#decide(taskContext, {
+        phase: 'P4',
         action: 'decide:verify-forward',
         input: { attempt: taskContext.counters.forwardVerify },
         basis: v.basis,
@@ -284,6 +286,7 @@ export class RunEngine {
     taskContext.counters.compensateVerify += 1
     const v = await this.verifier.verifyCompensate({ intent, recordId: taskContext.currentCompensation?.recordId })
     this.#decide(taskContext, {
+      phase: 'P5',
       action: 'decide:verify-compensate',
       input: { attempt: taskContext.counters.compensateVerify, recordId: taskContext.currentCompensation?.recordId },
       basis: v.basis ?? [{ fact: 'F4' }],
@@ -313,7 +316,7 @@ export class RunEngine {
     const r = await this.gateway.call(intent.degrade.candidatesFrom, {
       building: base.building,
       minCapacity: base.capacity ?? 0,
-    })
+    }, { phase: 'P5' })
     if (r.verdict !== 'SUCCESS') {
       taskContext.outcome = { message: `候选教室暂不可查询（${r.reasonCode}），无法继续换教室。已尝试：${this.#triedText(tried) || '无'}。`, note }
       machine.fire('DEGRADE_EXHAUSTED')
@@ -339,6 +342,7 @@ export class RunEngine {
       capacity: next.capacity,
     }
     this.#decide(taskContext, {
+      phase: 'P5',
       action: 'decide:degrade',
       input: { round: taskContext.degradeRounds, to: next.classroomId, tried: [...tried] },
       basis: [{ fact: 'F1' }],
@@ -362,6 +366,7 @@ export class RunEngine {
     }
     taskContext.currentCompensation = pending[0]
     this.#decide(taskContext, {
+      phase: 'P5',
       action: 'decide:compensate',
       input: { recordId: pending[0].recordId, label: pending[0].label, remaining: pending.length },
       basis: pending[0].evidenceRef ? [{ evidence: pending[0].evidenceRef.seq }] : [{ spec: 'intent-plans.yaml#compensation' }],
@@ -374,8 +379,8 @@ export class RunEngine {
 
   // 关键决策留痕（I4/P6）：判定结论→事件、查证结论、降级选择、补偿选择都要能被复述。
   // 任务终态条目会引用最后一条决策（evidence: seq），形成可回溯的链条。
-  #decide(taskContext, { action, input, basis, conclusion }) {
-    const entry = this.evidenceChain?.record({ action, input, basis, conclusion })
+  #decide(taskContext, { action, input, basis, conclusion, phase }) {
+    const entry = this.evidenceChain?.record({ action, input, basis, conclusion, phase })
     if (entry) taskContext.lastDecisionSeq = entry.seq
   }
 

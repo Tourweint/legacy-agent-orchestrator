@@ -24,9 +24,9 @@ export class Verifier {
   /**
    * 正向查证。返回 {outcome: 'FOUND_MINE'|'FOUND_OTHERS'|'NOT_FOUND'|'INCONCLUSIVE', matched?, basis, summary}
    */
-  async verifyForward({ intent, target, identity }) {
+  async verifyForward({ intent, target, identity, phase = 'P4' }) {
     const plan = this.#verificationPlan(intent)
-    const primary = await this.gateway.call(plan.primary.interface, {}, { initiatorIdentity: plan.primary.identity === 'initiator' ? identity.id : undefined })
+    const primary = await this.gateway.call(plan.primary.interface, {}, { initiatorIdentity: plan.primary.identity === 'initiator' ? identity.id : undefined, phase })
     const basis = [{ fact: 'F4' }]
 
     if (primary.verdict === 'SUCCESS') {
@@ -44,7 +44,7 @@ export class Verifier {
     }
 
     // 首选路径失败 → 降级 mine（发起时身份）：未命中不能作结论（§五——它看不见别人的记录）
-    const fallback = await this.gateway.call(plan.fallback.interface, {}, { initiatorIdentity: identity.id })
+    const fallback = await this.gateway.call(plan.fallback.interface, {}, { initiatorIdentity: identity.id, phase })
     if (fallback.verdict === 'SUCCESS') {
       const hit = this.#scanForward(fallback.data ?? [], target, identity.userId, { selfOnly: true })
       if (hit) {
@@ -59,12 +59,12 @@ export class Verifier {
    * 补偿查证：按 recordId 定位（红线 31）。recordId 未知时调用方必须直接判 INCONCLUSIVE（不得猜）。
    * 返回 {outcome: 'FOUND'|'NOT_FOUND'|'INCONCLUSIVE', ...}——FOUND = 撤销已生效。
    */
-  async verifyCompensate({ intent, recordId }) {
+  async verifyCompensate({ intent, recordId, phase = 'P5' }) {
     if (recordId == null) {
       return { outcome: 'INCONCLUSIVE', summary: 'recordId 未知（提交时响应丢失）——不得猜，直接查不清（第 06 章 §8.1）' }
     }
     const plan = this.#verificationPlan(intent)
-    const primary = await this.gateway.call(plan.primary.interface, {})
+    const primary = await this.gateway.call(plan.primary.interface, {}, { phase })
     if (primary.verdict !== 'SUCCESS') {
       return { outcome: 'INCONCLUSIVE', summary: '补偿查证列表不可用' }
     }

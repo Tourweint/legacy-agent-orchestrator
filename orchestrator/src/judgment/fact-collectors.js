@@ -79,7 +79,7 @@ export class FactCollector {
   async #collectClassroomDetail(target) {
     const classroom = target.classroom ?? {}
     if (classroom.classroomId != null) {
-      const r = await this.gateway.call('edu.classroom.detail', { classroomId: classroom.classroomId })
+      const r = await this.gateway.call('edu.classroom.detail', { classroomId: classroom.classroomId }, { phase: 'P2' })
       if (r.verdict !== 'SUCCESS') return unobtainable(r, '教室详情查询未成功')
       return obtained(
         {
@@ -96,13 +96,13 @@ export class FactCollector {
       const r = await this.gateway.call('edu.classroom.available', {
         building: classroom.building,
         minCapacity: 0,
-      })
+      }, { phase: 'P2' })
       if (r.verdict !== 'SUCCESS') return unobtainable(r, '教室列表查询未成功')
       const candidates = r.data ?? []
       const wanted = normalizeSpace(classroom.roomNumber)
       const matches = candidates.filter((c) => normalizeSpace(c.roomNumber) === wanted)
       if (matches.length === 1) {
-        const d = await this.gateway.call('edu.classroom.detail', { classroomId: matches[0].classroomId })
+        const d = await this.gateway.call('edu.classroom.detail', { classroomId: matches[0].classroomId }, { phase: 'P2' })
         if (d.verdict !== 'SUCCESS') return unobtainable(d, '教室详情查询未成功')
         return obtained(
           {
@@ -131,7 +131,7 @@ export class FactCollector {
   async #collectSeatLayout(target, facts) {
     const classroomId = facts.F1?.value?.classroomId
     if (!classroomId) return notApplicable('需要先解析出教室 id（F1）')
-    const r = await this.gateway.call('edu.classroom.seats', { classroomId })
+    const r = await this.gateway.call('edu.classroom.seats', { classroomId }, { phase: 'P2' })
     if (r.verdict !== 'SUCCESS') return unobtainable(r, '座位布局查询未成功')
     const raw = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.seats) ? r.data.seats : null
     if (raw === null) return unobtainable(null, '座位布局响应形状未知', 'seat-layout-shape-unknown')
@@ -150,7 +150,7 @@ export class FactCollector {
       classroomId,
       start: target.slot.start,
       end: target.slot.end,
-    })
+    }, { phase: 'P2' })
     if (r.verdict !== 'SUCCESS') return unobtainable(r, '时段占用查询未成功')
     const capacity = facts.F1?.value?.capacity
     const count = r.data.occupiedSeatCount
@@ -163,7 +163,7 @@ export class FactCollector {
   // F4 跨身份预约列表（查证支点）：不带 keyword（基线实测，适配器层已硬禁）；
   // 安全阈值（C5/§五.4）：超阈仍比对，但"未命中"不得当作"空闲"——由命题的 satisfiedDowngradeWhen 消化
   async #collectAdminReservations() {
-    const r = await this.gateway.call('logi.reservation.list', {})
+    const r = await this.gateway.call('logi.reservation.list', {}, { phase: 'P2' })
     if (r.verdict !== 'SUCCESS') return unobtainable(r, '跨身份预约列表查询未成功')
     const threshold = this.store.getConstants().verification.listSafetyThreshold
     const rows = r.data ?? []
@@ -179,7 +179,7 @@ export class FactCollector {
   // F5 我的预约：只含当前身份的 ACTIVE 记录——查证必须用发起写入时的同一身份（initiator）
   async #collectMyReservations(identity) {
     if (!identity?.id) return unobtainable(null, '缺少发起时身份', 'no-initiator-identity')
-    const r = await this.gateway.call('edu.reservation.mine', {}, { initiatorIdentity: identity.id })
+    const r = await this.gateway.call('edu.reservation.mine', {}, { initiatorIdentity: identity.id, phase: 'P2' })
     if (r.verdict !== 'SUCCESS') return unobtainable(r, '我的预约查询未成功')
     return obtained(r.data ?? [], { total: (r.data ?? []).length })
   }
@@ -188,7 +188,7 @@ export class FactCollector {
   async #collectMaintenanceWindows(target, facts) {
     const classroomId = facts.F1?.value?.classroomId
     if (!classroomId) return notApplicable('需要先解析出教室 id（F1）')
-    const r = await this.gateway.call('logi.maintenance.list', { classroomId })
+    const r = await this.gateway.call('logi.maintenance.list', { classroomId }, { phase: 'P2' })
     if (r.verdict !== 'SUCCESS') return unobtainable(r, '维修窗口查询未成功')
     return obtained(r.data ?? [], { total: (r.data ?? []).length })
   }
@@ -200,6 +200,7 @@ export class FactCollector {
       const fact = facts[id]
       if (!fact) continue
       this.evidenceChain.record({
+        phase: 'P2',
         action: `collect-fact:${id}`,
         input: { fact: id },
         basis: [{ fact: id }],
