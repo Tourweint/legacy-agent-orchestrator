@@ -76,6 +76,7 @@ export class ContactGateway {
     let transportResult
     let signals
     let outcome
+    let firstAttempt = null // 首次尝试的判定（重试在内部发生时，证据链仍可见——§八 证据 3）
     const startedAt = this.now().getTime()
 
     while (true) {
@@ -89,6 +90,10 @@ export class ContactGateway {
       })
       signals = this.adapters.extractSignals(transportResult)
       outcome = evaluateVerdict(kind, signals, iface)
+      if (attempt === 1) {
+        // 首判留档：若发生内部重试（R6/R8/R9），第一次的判定仍可被复核（§八 证据 3）
+        firstAttempt = { verdict: outcome.verdict, ruleRow: outcome.ruleRow, reasonCode: outcome.reasonCode }
+      }
 
       const retriesLeft = attempt <= retryConfig.maxRetries
       if (kind === 'read' && outcome.retryable && retriesLeft) {
@@ -117,6 +122,9 @@ export class ContactGateway {
 
     const evidenceRef = this.#recordEvidence({
       chain,
+      identityId,
+      transportResult,
+      firstAttempt,
       iface,
       wire,
       params,
@@ -147,7 +155,7 @@ export class ContactGateway {
    * 判定依据落证据链（I4/P6）：依据=命中的规则行号；附加档=协议级信号+清洗后的响应片段。
    * 原始片段先剔凭证形态再截断（C16）；登录响应整段跳过（其体内有 token）。
    */
-  #recordEvidence({ chain, iface, wire, params, attempt, signals, finalOutcome, elapsedMs, phase }) {
+  #recordEvidence({ chain, identityId, transportResult, firstAttempt, iface, wire, params, attempt, signals, finalOutcome, elapsedMs, phase }) {
     if (!chain) return null
     let rawFragment = ''
     if (signals.transportKind === 'response' && !FRAGMENT_SKIPPED_INTERFACES.has(iface.id)) {
@@ -165,12 +173,16 @@ export class ContactGateway {
         summary: `${finalOutcome.reasonCode}${finalOutcome.ambiguous ? '（歧义信号）' : ''}`,
       },
       metadata: {
+        identity: identityId ?? null,
+        injected: transportResult.injected === true || undefined,
+        faultNote: transportResult.faultNote,
         transportKind: signals.transportKind,
         httpStatus: signals.httpStatus,
         businessCode: signals.businessCode,
         serverMessage: signals.message,
         rawFragment,
         elapsedMs,
+        ...(attempt > 1 && firstAttempt ? { attempts: attempt, firstAttempt } : {}),
       },
       ...(phase ? { phase } : {}),
     })

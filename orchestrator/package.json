@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/access/main.js",
     "test": "node --test \"test/*.test.mjs\"",
-    "check": "node scripts/structure-check.mjs && node scripts/constraint-check.mjs"
+    "check": "node scripts/structure-check.mjs && node scripts/constraint-check.mjs",
+    "experiment": "node scripts/run-chaos-experiments.mjs"
   },
   "dependencies": {
     "yaml": "^2.6.1"
