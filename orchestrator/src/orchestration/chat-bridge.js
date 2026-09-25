@@ -119,14 +119,46 @@ export class ChatBridge {
     // C7：目标不是教室的意图（"我订了哪些教室"/"把周三那间退了"）不做教室名与时段归一化。
     // 理由：这类意图的目标是"我自己的记录"，说教室/日期只是**可选的定位提示**——
     // 强制归一化会把"什么都不用说也能办"变成"必须说清楚才行"。
-    const targetless = !(intent.slots?.required ?? []).some((s) =>
-      ['classroomName', 'datePhrase', 'timeSegment'].includes(s),
-    )
-    if (targetless) {
+    const requiredSlots = intent.slots?.required ?? []
+    const needsClassroom = requiredSlots.includes('classroomName')
+    const needsTime = requiredSlots.some((s) => ['datePhrase', 'timeSegment'].includes(s))
+    if (!needsClassroom && !needsTime) {
       taskContext.chat.resources = [{ classroom: {} }]
       taskContext.slot = null
       taskContext.currentTarget = {}
       // 已识别到的原话槽位留在 taskContext.slots，供记录定位（run-engine #filterMyReservations）使用
+      machine.fire('INTENT_RESOLVED', { payload: intent.id })
+      return
+    }
+    if (!needsClassroom) {
+      // C8 改期：只需要解析**目标时段**——目标教室来自"我的预约"里定位到的那条记录，
+      // 不能拿空教室名去解析（那会把"改到周四下午"变成"解析教室失败"）。
+      let range
+      try {
+        range = resolveRelativeRange(
+          { datePhrase: taskContext.slots.datePhrase, segmentName: taskContext.slots.timeSegment },
+          new Date(),
+          this.store.getConstants().time,
+        )
+      } catch {
+        this.#clarify(machine, taskContext, {
+          kind: 'unparseable-slot',
+          question: `「${taskContext.slots.datePhrase ?? ''} ${taskContext.slots.timeSegment ?? ''}」我没看懂要改到什么时候——请换个说法（例如：周四下午）。`,
+        })
+        return
+      }
+      const check = checkLegacyTimeConstraints(range, new Date(), this.store.getConstants().time)
+      if (!check.ok) {
+        this.#clarify(machine, taskContext, {
+          kind: 'unparseable-slot',
+          question: `${check.violations.join('；')}。您想改到哪个时段？`,
+        })
+        return
+      }
+      taskContext.chat.resources = [{ classroom: {} }]
+      taskContext.slot = range
+      taskContext.currentTarget = {}
+      taskContext.confirmNotes = range.explanations // §7.3：推算结果必须展示并标注"请确认"
       machine.fire('INTENT_RESOLVED', { payload: intent.id })
       return
     }

@@ -154,6 +154,24 @@ const HANDLERS = {
     return { satisfied: Boolean(row) && row.status === 'ACTIVE', matched: row ?? null }
   },
   'record-unknown': (_expr, ctx) => targetRecordId(ctx) == null,
+  // C8：目标时段是否可办——**排除本人待改期的那条记录**（否则会被自己判成"被占"）。
+  // satisfied = 没有冲突（命题成立）。
+  'no-overlap-excluding-self': (expr, ctx) => {
+    const fact = getFact(ctx, expr.fact)
+    if (fact.state !== 'obtained') throw new JudgmentError(`算子 no-overlap-excluding-self 要求 ${expr.fact} 已获得`)
+    const selfRecordId = targetRecordId(ctx)
+    const classroom = ctx.target?.classroom ?? {}
+    const classroomId = classroom.resourceId ?? classroom.classroomId ?? null
+    const slot = ctx.target?.slot
+    if (!slot?.start || !slot?.end) throw new JudgmentError('算子 no-overlap-excluding-self 需要目标时段（slot）')
+    for (const row of fact.value ?? []) {
+      if (row.status !== 'ACTIVE') continue // J3：仅计 ACTIVE
+      if (selfRecordId != null && row.recordId === selfRecordId) continue // ★ 排除自己那条
+      if (classroomId != null && row.resourceType === 'CLASSROOM' && row.resourceId !== classroomId) continue
+      if (rangesOverlap(row.start, row.end, slot.start, slot.end)) return { satisfied: false, matched: row }
+    }
+    return { satisfied: true }
+  },
   'maintenance-overlaps': (expr, ctx) => {
     const fact = getFact(ctx, expr.fact)
     if (fact.state !== 'obtained') throw new JudgmentError(`算子 maintenance-overlaps 要求 ${expr.fact} 已获得`)

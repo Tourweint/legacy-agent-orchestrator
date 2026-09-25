@@ -153,3 +153,54 @@ intents:
     successMessage: 已为您撤销，该预约不再生效
     resolution: { kind: my-reservation }
     degrade: null
+
+  # ── C8 改期：把周三那间改到周四下午 ───────────────────────────────────────
+  # 两次写入：**先建新、后撤旧**（拍板理由见能力清单 C8——先撤后建会出现"旧已撤、新没建成"
+  # 的空窗，那时想恢复旧预约要面对"时段可能已被别人抢走"，只能落人工；先建后撤最坏是
+  # "新的成了、旧的没撤掉"，用户仍有两个时段可用，风险单向）。
+  # 目标教室不是从话里解析的，而是**从"我的预约"里定位到的那条记录**带过来的。
+  - id: reschedule-my-reservation
+    name: 改期
+    readOnly: false
+    multiResource: false
+    requiresEntityResolution: false
+    slots:
+      required: [datePhrase, timeSegment]        # 改到什么时候必须说清
+      optional: [classroomName, originalDatePhrase, originalTimeSegment]
+      slotHints:
+        datePhrase: 改到的日期（用户原话，如"周四"）
+        timeSegment: 改到的时段（用户原话，如"下午"）
+        classroomName: 教室名（可选，如"数智楼123"——用来判断改哪一条）
+        originalDatePhrase: 原来那天的说法（可选，如"周三"——用来判断改哪一条）
+        originalTimeSegment: 原来时段说法（可选）
+    facts: [F4, F5]
+    propositions:
+      - P-IS-MINE                      # 只能改自己的
+      - P-SLOT-FREE-EXCLUDING-SELF     # 目标时段空闲，且排除自己这条待改期的记录
+    steps:
+      - { step: my-reservations, interface: edu.reservation.mine,             serves: "F5 + 定位待改期记录" }
+      - { step: create-new,      interface: edu.reservation.classroom.create, serves: "先建新（新时段）", role: submit,
+          params: { classroomId: "target.resourceId", start: "slot.start", end: "slot.end" } }
+      - { step: cancel-old,      interface: edu.reservation.cancel,           serves: "后撤旧（改期收尾）", role: finalize,
+          params: { recordId: "target.recordId" } }
+    verification:
+      primary:  { interface: logi.reservation.list, identity: ADMIN }
+      fallback: { interface: edu.reservation.mine,  identity: initiator }
+      byRecord: true               # 收尾失败时按 recordId 查证"旧记录是否已不再生效"
+      predicate:
+        forward:    "按 recordId 定位旧记录：查无此 id 或状态非 ACTIVE = 已撤掉"
+        compensate: "同上"
+    # 补偿只针对"新建"这一步：撤旧失败时**不回滚新记录**（用户仍有两个时段可用，风险单向）；
+    # 收尾失败的重试口径由编排层处理（重试一次 → 仍失败落人工介入并如实告知）
+    compensation:
+      action: edu.reservation.cancel
+      recordIdRequired: true
+      listNotPersisted: true
+    successMessage: 已为您改期
+    failureMessage: 新时段没能订上，您原来的预约未受影响。
+    # 定位提示映射：**不能用** datePhrase/timeSegment 去筛旧记录——它们指的是"改到什么时候"，
+    # 用来筛旧记录必然筛空（旧记录在原来那天）。原来那天用 originalDatePhrase/originalTimeSegment。
+    resolution:
+      kind: my-reservation
+      hints: { classroomName: classroomName, datePhrase: originalDatePhrase, timeSegment: originalTimeSegment }
+    degrade: null

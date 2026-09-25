@@ -239,46 +239,77 @@ export class RunEngine {
   // ── 提交（SUBMITTING）：唯一副作用出口。两种目的走同一处理器，接口来自意图计划 ──
   async #doSubmitting({ machine, taskContext }) {
     if (machine.purpose === 'forward') {
-      const submitStep = (taskContext.intent.steps ?? []).find((s) => s.role === 'submit')
-      if (!submitStep) throw new OrchestrationError(`意图 ${taskContext.intentId} 缺少 role=submit 的步骤`)
-      // 提交参数：计划声明了 params 就按声明组装（撤销要的是记录编号），否则按"教室+时段"老口径
-      const submitParams = submitStep.params
-        ? this.#buildStepParams(submitStep.params, taskContext)
-        : {
-            classroomId: taskContext.currentTarget.classroomId,
-            start: taskContext.slot.start,
-            end: taskContext.slot.end,
-            ...(taskContext.reason ? { reason: taskContext.reason } : {}),
+      // 写步骤序列：`submit` = 正向写入（成功即进补偿清单）；`finalize` = 收尾写入（改期的"撤旧"）。
+      // 一次运行可以有多个写步骤（C8 改期：先建新、后撤旧），按声明顺序执行；
+      // 中途失败时，已经成功的**正向写入**仍留在补偿清单里（由上层决定是否回滚）。
+      const writeSteps = (taskContext.intent.steps ?? []).filter((s) => s.role === 'submit' || s.role === 'finalize')
+      if (writeSteps.length === 0) throw new OrchestrationError(`意图 ${taskContext.intentId} 缺少写步骤（role=submit/finalize）`)
+      for (let i = taskContext.submitIndex ?? 0; i < writeSteps.length; i += 1) {
+        const step = writeSteps[i]
+        // 提交参数：计划声明了 params 就按声明组装（撤销要记录编号、改期要教室+新时段），否则按老口径
+        const params = step.params
+          ? this.#buildStepParams(step.params, taskContext)
+          : {
+              classroomId: taskContext.currentTarget.classroomId,
+              start: taskContext.slot.start,
+              end: taskContext.slot.end,
+              ...(taskContext.reason ? { reason: taskContext.reason } : {}),
+            }
+        const r = await this.gateway.call(step.interface, params, { phase: 'P3' })
+        taskContext.lastCall = r
+        if (r.verdict !== 'SUCCESS') {
+          taskContext.submitIndex = i
+          taskContext.failedStepRole = step.role // 查证阶段要据此区分"建新失败"与"撤旧失败"
+          if (step.role === 'finalize') {
+            // 收尾步（撤旧）失败：**不回滚已建的新记录**（用户仍有两个时段可用，风险单向），
+            // 按"不确定"进查证——byRecord 会告诉我们旧记录到底撤掉没有；查证仍不收敛才落人工介入。
+            taskContext.outcome = {
+              message: `新记录已订上（#${taskContext.lastEffect?.recordId ?? '—'}），但原来的预约没能撤销。${taskContext.intent.failureMessage ?? ''}`,
+            }
+            machine.fire('CALL_UNKNOWN', { payload: { reasonCode: r.reasonCode } })
+            return
           }
-      const r = await this.gateway.call(submitStep.interface, submitParams, { phase: 'P3' })
-      taskContext.lastCall = r
-      if (r.verdict === 'SUCCESS') {
-        const recordId = r.data?.recordId ?? (submitStep.params ? taskContext.currentTarget?.recordId ?? null : null)
-        // 撤销类意图（compensation: null）不往补偿清单里塞东西：撤销是目的，不是需要回滚的副作用
-        if (!taskContext.intent.compensation) {
-          taskContext.lastEffect = {
-            recordId,
-            label: taskContext.currentTarget?.resourceName ?? taskContext.intent.name ?? '',
-            slotText: taskContext.slot
-              ? describeRange(taskContext.slot.start, taskContext.slot.end, this.store.getConstants().time)
-              : '',
-          }
-          machine.fire('CALL_SUCCESS', { payload: recordId })
+          this.#fireCallOutcome(machine, r)
           return
         }
-        taskContext.compensations.push({
-          recordId,
-          interfaceId: submitStep.interface,
-          identityId: taskContext.identity.id,
-          label: `${taskContext.currentTarget.building ?? ''} ${taskContext.currentTarget.roomNumber ?? ''}`.trim() || `教室 ${taskContext.currentTarget.classroomId}`,
-          slotText: describeRange(taskContext.slot.start, taskContext.slot.end, this.store.getConstants().time),
-          evidenceRef: r.evidenceRef,
-          revoked: false,
-        })
-        machine.fire('CALL_SUCCESS', { payload: recordId })
-        return
+        const recordId = r.data?.recordId ?? (step.params ? taskContext.currentTarget?.recordId ?? null : null)
+        if (step.role === 'submit') {
+          const label =
+            taskContext.currentTarget?.resourceName ??
+            `${taskContext.currentTarget?.building ?? ''} ${taskContext.currentTarget?.roomNumber ?? ''}`.trim() ??
+            ''
+          const slotText = taskContext.slot
+            ? describeRange(taskContext.slot.start, taskContext.slot.end, this.store.getConstants().time)
+            : ''
+          // 撤销类意图（compensation: null）不往补偿清单里塞东西：撤销是目的，不是需要回滚的副作用
+          if (taskContext.intent.compensation) {
+            taskContext.compensations.push({
+              recordId,
+              interfaceId: step.interface,
+              identityId: taskContext.identity?.id ?? null,
+              label: label || `资源 ${taskContext.currentTarget?.resourceId ?? taskContext.currentTarget?.classroomId ?? ''}`,
+              slotText,
+              evidenceRef: r.evidenceRef,
+              revoked: false,
+            })
+          }
+          taskContext.lastEffect = {
+            recordId,
+            label,
+            slotText,
+            oldRecordId: taskContext.currentTarget?.recordId ?? null,
+          }
+        } else {
+          taskContext.lastEffect = { ...(taskContext.lastEffect ?? {}), cancelledRecordId: recordId }
+        }
+        taskContext.submitIndex = i + 1
       }
-      this.#fireCallOutcome(machine, r)
+      const payloadRecordId =
+        taskContext.lastEffect?.cancelledRecordId ??
+        taskContext.lastEffect?.recordId ??
+        taskContext.compensations[taskContext.compensations.length - 1]?.recordId ??
+        null
+      machine.fire('CALL_SUCCESS', { payload: payloadRecordId })
       return
     }
     // 补偿撤销：撤销动作来自意图计划的 compensation 声明
@@ -299,14 +330,21 @@ export class RunEngine {
     if (machine.purpose === 'forward') {
       if (r.verdict === 'SUCCESS') {
         const item = taskContext.compensations[taskContext.compensations.length - 1]
-        // 撤销类意图：没有补偿条目，话术按"已撤销"给（不是"已办妥新预约"）
-        const message = item
-          ? `已为您办妥：${item.label ?? ''}（预约 #${item.recordId}，${item.slotText ?? ''}）${taskContext.outcome?.exempt?.length ? '（未能确认是否重复）' : ''}`
-          : `${taskContext.intent.successMessage ?? '已为您处理'}（记录 #${taskContext.lastEffect?.recordId ?? '—'}）。`
-        taskContext.outcome = { message, recordId: item?.recordId ?? taskContext.lastEffect?.recordId }
+        const effect = taskContext.lastEffect
+        const recordId = effect?.recordId ?? item?.recordId ?? null
+        // 话术优先级：计划声明的成功话术（撤销/改期这类"目的型"意图）→ 补偿条目（新建预约）→ 兜底
+        const message = taskContext.intent.successMessage
+          ? `${taskContext.intent.successMessage}（记录 #${recordId ?? '—'}${effect?.slotText ? `，${effect.slotText}` : ''}）`
+          : item
+            ? `已为您办妥：${item.label ?? ''}（预约 #${item.recordId}，${item.slotText ?? ''}）${taskContext.outcome?.exempt?.length ? '（未能确认是否重复）' : ''}`
+            : `已为您处理（记录 #${recordId ?? '—'}）。`
+        taskContext.outcome = { message, recordId }
         machine.fire('JUDGE_SUCCESS')
       } else {
-        taskContext.outcome = { message: `提交未成功（${r.reasonCode}），未产生副作用。` }
+        // 失败话术：计划可以声明（改期＝"新时段没订上，您原来的预约未受影响"——比通用话术诚实具体）
+        taskContext.outcome = {
+          message: taskContext.intent.failureMessage ?? `提交未成功（${r.reasonCode}），未产生副作用。`,
+        }
         machine.fire('JUDGE_FAILURE')
       }
       return
@@ -325,14 +363,21 @@ export class RunEngine {
     const constants = this.store.getConstants()
     if (machine.purpose === 'forward') {
       if (taskContext.counters.forwardVerify >= constants.verification.forwardAttempts) {
-        taskContext.outcome = { message: '多次查证仍无法确认提交结果，需人工核实是否已生效。' }
+        // 改期（byRecord）：重试用尽仍撤不掉旧记录 → 如实告知"两个时段都在"，落人工介入（C8 口径）
+        taskContext.outcome = {
+          message:
+            taskContext.intent.verification?.byRecord === true
+              ? '原来的预约仍未被撤销——您现在两个时段都有预约，需人工介入核实。'
+              : '多次查证仍无法确认提交结果，需人工核实是否已生效。',
+        }
         machine.fire('VERIFY_LIMIT')
         return
       }
       taskContext.counters.forwardVerify += 1
-      // 撤销语境（计划声明 byRecord）：查证一律按 recordId 定位（第 06 章 §8.1）——
+      // 撤销语境（计划声明 byRecord + 失败的是收尾步）：查证一律按 recordId 定位（第 06 章 §8.1）——
       // 撤销后本来就"没有时段可重叠"，按重叠比对既错又危险。
-      if (taskContext.intent.verification?.byRecord === true) {
+      // 若失败的是**建新步**（如改期里新时段冲突），要查的是"新记录到底落没落"，走常规查证。
+      if (taskContext.intent.verification?.byRecord === true && taskContext.failedStepRole === 'finalize') {
         const targetRecordId = taskContext.currentTarget?.recordId ?? taskContext.lastEffect?.recordId ?? null
         const v = await this.verifier.verifyCompensate({ intent: taskContext.intent, recordId: targetRecordId })
         this.#decide(taskContext, {
@@ -343,7 +388,12 @@ export class RunEngine {
           conclusion: { outcome: v.outcome, summary: v.summary },
         })
         if (v.outcome === 'FOUND') {
-          taskContext.outcome = { message: `已为您撤销：记录 #${targetRecordId} 已不再生效。`, recordId: targetRecordId }
+          taskContext.outcome = {
+            message: taskContext.intent.successMessage
+              ? `${taskContext.intent.successMessage}（已确认：记录 #${targetRecordId} 不再生效${taskContext.lastEffect?.recordId ? `，新记录 #${taskContext.lastEffect.recordId}` : ''}）`
+              : `已为您撤销：记录 #${targetRecordId} 已不再生效。`,
+            recordId: targetRecordId,
+          }
           machine.fire('VERIFY_FOUND', { payload: 'mine' }) // forward + mine → DONE（撤销即目的）
         } else if (v.outcome === 'NOT_FOUND') {
           machine.fire('VERIFY_NOT_FOUND', { payload: { attempt: taskContext.counters.forwardVerify } })
@@ -492,7 +542,7 @@ export class RunEngine {
       machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'mine-unavailable' } })
       return true
     }
-    const hints = taskContext.slots ?? {}
+    const hints = this.#locateHints(taskContext)
     const matched = this.#filterMyReservations(r.data ?? [], hints)
     taskContext.locatedRecords = matched
     if (matched.length === 0) {
@@ -516,9 +566,32 @@ export class RunEngine {
       return true
     }
     const row = matched[0]
-    taskContext.currentTarget = { ...(taskContext.currentTarget ?? {}), ...row }
+    taskContext.currentTarget = {
+      ...(taskContext.currentTarget ?? {}),
+      ...row,
+      // 教室型记录：把"记录里的资源"折算成教室 id——后续按教室比对的查证与提交参数都要用它
+      ...(row.resourceType === 'CLASSROOM' ? { classroomId: row.resourceId } : {}),
+    }
     machine.fire('ENTITY_RESOLVED', { payload: row.recordId })
     return true
+  }
+
+  /**
+   * 把"用户说的话"映射成定位提示：计划可以声明 hints（如改期用 originalDatePhrase 而**不是**
+   * datePhrase——后者指的是"改到什么时候"，拿它筛旧记录必然筛空）。未声明时按同名字段取。
+   */
+  #locateHints(taskContext) {
+    const raw = taskContext.slots ?? {}
+    const map = taskContext.intent.resolution?.hints
+    if (!map) {
+      return { classroomName: raw.classroomName, datePhrase: raw.datePhrase, timeSegment: raw.timeSegment }
+    }
+    const pick = (slotName) => (slotName ? raw[slotName] : undefined)
+    return {
+      classroomName: pick(map.classroomName),
+      datePhrase: pick(map.datePhrase),
+      timeSegment: pick(map.timeSegment),
+    }
   }
 
   /** 用可选的提示词（教室名 / 日期说法 / 时段说法）过滤本人记录；说法规则外时退化为不过滤。 */

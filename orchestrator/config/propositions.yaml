@@ -33,6 +33,17 @@ propositions:
     degradable: false
     invariants: [I2, I5]
 
+  - id: P-SLOT-FREE-EXCLUDING-SELF
+    semantics: 目标时段可办，且**排除本人这条待改期的记录**——否则会被自己的旧记录判成"被占"
+    dependsOn: [F4]
+    when: {op: no-overlap-excluding-self, fact: F4}
+    violatedMessage: >-
+      目标时段已被占用（{{matched.resourceName}}）。您原来的预约**未受影响**。
+    degradable: false
+    invariants: [I2]
+    # 实现说明（能力清单 C8 二审补）：不是新算子库，而是"带排除条件的比对"——
+    # 排除的那条记录编号由编排层在定位阶段放进目标上下文。
+
   # ── 主链路 ────────────────────────────────────────────────────────────────
   - id: P-CLASSROOM-EXISTS
     semantics: 教室存在——人读标识能解析到系统 id

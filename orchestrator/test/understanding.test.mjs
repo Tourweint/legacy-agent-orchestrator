@@ -10,7 +10,7 @@ import { buildSystemPrompt } from '../src/understanding/prompt.js'
 import { ConfigStore } from '../src/config/config-store.js'
 import { parseClassroomName } from '../src/canonical/classroom-name.js'
 import { TaskRunner } from '../src/orchestration/task-runner.js'
-import { makeGateway, ok, UIDS, sessionIdentity } from './helpers/fake-legacy.js'
+import { makeGateway, ok, envelope, UIDS, sessionIdentity } from './helpers/fake-legacy.js'
 
 const store = new ConfigStore()
 
@@ -83,12 +83,13 @@ test('闸门二：置信度不达标 → clarify 并列出候选意图（E5）',
   const result = await engine.understand({ text: '帮我弄一下教室' })
   assert.equal(result.status, 'clarify')
   assert.equal(result.reason, 'low-confidence')
-  // 候选来自意图计划闭集（C7 上线后为 4 条：借教室 / 查可用性 / 查我的预约 / 撤我的预约）
+  // 候选来自意图计划闭集（C7/C8 上线后为 5 条）
   assert.deepEqual(result.candidates.map((c) => c.id).sort(), [
     'borrow-classroom',
     'cancel-my-reservation',
     'query-classroom-availability',
     'query-my-reservations',
+    'reschedule-my-reservation',
   ])
 })
 
@@ -363,4 +364,90 @@ test('C7 退：名下没有匹配 → 有依据拒绝（并说出当前有什么
   assert.match(outcome.result.conclusion, /没有匹配/)
   assert.match(outcome.result.conclusion, /数智楼 222/)
   assert.equal(gateway.transport.calls.filter((c) => c.method === 'DELETE').length, 0)
+})
+
+// ---- C8 改期（先建新、后撤旧）--------------------------------------------------
+
+// 与他人的冲突行：时段跨度刻意写得很宽，这样无论"周四下午"解析成哪一天都会重叠
+const conflictRow = (over = {}) => ({
+  id: 999,
+  userId: 10019, // 别人
+  username: 'abc',
+  resourceType: 'CLASSROOM',
+  resourceId: 5,
+  resourceName: '数智楼 123',
+  startTime: '2026-09-27T00:00:00',
+  endTime: '2026-11-30T00:00:00',
+  status: 'ACTIVE',
+  ...over,
+})
+
+const rescheduleSlots = { classroomName: '数智楼123', datePhrase: '周四', timeSegment: '下午' }
+const rescheduleOut = () => [{ intent: 'reschedule-my-reservation', slots: rescheduleSlots, confidence: 0.9, outOfDomain: false }]
+
+test('C8 改期：先建新、后撤旧 —— 两次写入按顺序发生，旧记录被撤掉', async () => {
+  const { outcome, gateway } = await chat({ mineRows: [mineRow()], adminRows: [] }, rescheduleOut(), '把数智楼123那间改到周四下午')
+  assert.ok(!outcome.suspended)
+  assert.equal(outcome.result.terminal, 'DONE')
+  assert.match(outcome.result.conclusion, /已为您改期/)
+  const writes = gateway.transport.calls.filter(
+    (c) => c.path === '/reservations/classrooms' || c.method === 'DELETE',
+  )
+  assert.equal(writes.length, 2, '恰好两次写入')
+  assert.equal(writes[0].path, '/reservations/classrooms', '先建新')
+  assert.match(writes[1].path, /\/reservations\/121$/, '后撤旧（撤的是原记录）')
+  assert.equal(writes[0].body.classroom_id, 5, '新记录订在原教室')
+})
+
+test('C8 改期：目标时段被他人占用 → 有依据拒绝、旧记录完好、两次写入都没发生', async () => {
+  const { outcome, gateway } = await chat(
+    { mineRows: [mineRow()], adminRows: [conflictRow()] },
+    rescheduleOut(),
+    '把数智楼123那间改到周四下午',
+  )
+  assert.equal(outcome.result.terminal, 'REJECTED')
+  assert.match(outcome.result.conclusion, /未受影响/)
+  assert.equal(gateway.transport.calls.filter((c) => c.path === '/reservations/classrooms').length, 0)
+  assert.equal(gateway.transport.calls.filter((c) => c.method === 'DELETE').length, 0)
+})
+
+test('C8 改期：目标时段只有"自己那条待改期记录"重叠 → 不算被占（排除自己）', async () => {
+  // 冲突行就是待改期的那条记录本身（recordId 与定位结果一致）——不排除它就会被自己判成"被占"
+  const selfOverlapping = conflictRow({ id: 121, userId: UIDS['233'], username: '233' })
+  const { outcome, gateway } = await chat(
+    { mineRows: [mineRow()], adminRows: [selfOverlapping] },
+    rescheduleOut(),
+    '把数智楼123那间改到周四下午',
+  )
+  assert.equal(outcome.result.terminal, 'DONE')
+  assert.equal(gateway.transport.calls.filter((c) => c.path === '/reservations/classrooms').length, 1)
+})
+
+test('C8 改期：撤旧失败 → 重试一次 → 仍失败落人工介入，并如实告知"两个时段都有"', async () => {
+  const { outcome, gateway } = await chat(
+    {
+      mineRows: [mineRow()],
+      // 撤销始终返回业务失败；且旧记录一直 ACTIVE（查证永远是"还没撤掉"）
+      adminRows: [conflictRow({ id: 121, userId: UIDS['233'], username: '233' })],
+      cancel: envelope(400, '当前状态不允许撤销'),
+    },
+    rescheduleOut(),
+    '把数智楼123那间改到周四下午',
+  )
+  assert.equal(outcome.result.terminal, 'UNRESOLVED')
+  assert.match(outcome.result.conclusion, /两个时段/)
+  // 新记录只建了一次（不回滚），撤销尝试了 1 + 2 次重试
+  assert.equal(gateway.transport.calls.filter((c) => c.path === '/reservations/classrooms').length, 1)
+  assert.equal(gateway.transport.calls.filter((c) => c.method === 'DELETE').length, 3)
+})
+
+test('C8 改期：新时段没订上 → 什么都不用撤（旧记录未动）', async () => {
+  const { outcome, gateway } = await chat(
+    // 建新返回业务失败（如 409 冲突）：创建类失败 → FAILURE
+    { mineRows: [mineRow()], adminRows: [], create: envelope(409, '该时间段内教室已被整间预约') },
+    rescheduleOut(),
+    '把数智楼123那间改到周四下午',
+  )
+  assert.equal(outcome.result.terminal, 'UNRESOLVED') // 409 是歧义信号 → 进查证（既有口径）
+  assert.equal(gateway.transport.calls.filter((c) => c.method === 'DELETE').length, 0, '旧记录一个都没撤')
 })
