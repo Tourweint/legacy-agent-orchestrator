@@ -45,20 +45,26 @@ export class EvidenceChain {
    * @param {object} entry
    * @param {string} entry.action     动作名（如 "verify-slot" / "reject-task" / "submit-reservation"）
    * @param {*}      [entry.input]    动作输入（写入时净化）
-   * @param {Array<{fact?: string, proposition?: string, detail?: string}>} entry.basis
-   *                                   依据引用：哪条事实（F#）、哪条命题（P-#）、补充说明
+   * @param {Array<{fact?: string, proposition?: string, rule?: string, detail?: string}>} entry.basis
+   *                                   依据引用：哪条事实（F#）、哪条命题（P-#）、哪条判定规则行
+   *                                   （W#/R#，阶段 1 起接触层判定依据），或补充说明
    * @param {{outcome: string, summary: string}} entry.conclusion
    *                                   结论：唯一确定的 outcome + 面向用户/证据的一句话
+   * @param {*}      [entry.metadata] 附加档位（如协议级信号与已清洗的原始响应片段）；
+   *                                   仅随证据条目留档，不参与判定（阶段 1 增补）
    */
-  record({ action, input, basis, conclusion }) {
+  record({ action, input, basis, conclusion, metadata }) {
     if (!action) throw new EvidenceError('证据条目缺 action')
     if (!Array.isArray(basis) || basis.length === 0) {
       // 为什么强制：I4——"为什么做了这一步"必须永远可回答；没有依据的动作不允许发生
       throw new EvidenceError(`动作 "${action}" 缺依据引用（basis 不得为空，I4）`)
     }
     for (const ref of basis) {
-      if (!ref || typeof ref !== 'object' || (!ref.fact && !ref.proposition)) {
-        throw new EvidenceError(`动作 "${action}" 的依据引用必须指向事实（F#）或命题（P-#）`)
+      if (!ref || typeof ref !== 'object' || (!ref.fact && !ref.proposition && !ref.rule)) {
+        throw new EvidenceError(`动作 "${action}" 的依据引用必须指向事实（F#）、命题（P-#）或判定规则行（W#/R#）`)
+      }
+      if (ref.rule && !/^[WR]\d{1,2}$/.test(ref.rule)) {
+        throw new EvidenceError(`动作 "${action}" 的规则行号格式非法: ${ref.rule}（C15：W/R + 稳定编号）`)
       }
     }
     if (!conclusion || !conclusion.outcome) {
@@ -73,6 +79,7 @@ export class EvidenceChain {
       input: this.redactor.redact(input ?? null),
       basis: this.redactor.redact(basis),
       conclusion: this.redactor.redact(conclusion),
+      ...(metadata !== undefined ? { metadata: this.redactor.redact(metadata) } : {}),
     }
     this.#entries.push(entry)
     return entry

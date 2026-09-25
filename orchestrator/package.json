@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
-    "check": "node scripts/structure-check.mjs"
+    "check": "node scripts/structure-check.mjs && node scripts/constraint-check.mjs"
   },
   "dependencies": {
     "yaml": "^2.6.1"

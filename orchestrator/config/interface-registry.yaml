@@ -15,6 +15,7 @@ interfaces:
     domain: auth
     method: POST
     path: /auth/login
+    timeoutClass: read
     purpose: 登录换取 access token；兼作凭证刷新路径（J5 三审拍板：读 401 透明重登，写 401 先查证）
     requiredIdentity: none
     sideEffect: false
@@ -34,6 +35,7 @@ interfaces:
     domain: edu
     method: GET
     path: /classrooms/{id}
+    timeoutClass: read
     purpose: 教室详情——把人读名解析成系统 id（实体消解），并读取 status（F1）
     requiredIdentity: TEACHER
     sideEffect: false
@@ -51,6 +53,7 @@ interfaces:
     domain: edu
     method: GET
     path: /classrooms/available_list
+    timeoutClass: read
     purpose: 按楼栋与容量筛候选（仅降级时的候选池来源，F-候选）
     requiredIdentity: TEACHER
     sideEffect: false
@@ -71,6 +74,7 @@ interfaces:
     domain: edu
     method: GET
     path: /classrooms/{id}/seats
+    timeoutClass: read
     purpose: 座位布局（F2；仅"粒度差异"只读演示用，D1：保留但不在主链路）
     requiredIdentity: TEACHER
     sideEffect: false
@@ -87,6 +91,7 @@ interfaces:
     domain: edu
     method: GET
     path: /classrooms/{id}/reserved_seats
+    timeoutClass: read
     purpose: 该教室该时段被占座位（F3；时段占用判定的事实来源之一）
     requiredIdentity: TEACHER
     sideEffect: false
@@ -107,6 +112,7 @@ interfaces:
     domain: logi
     method: GET
     path: /admin/maintenance
+    timeoutClass: readHeavyList
     purpose: 维修窗口列表（F6；判定"是否在检修"）
     requiredIdentity: ADMIN
     sideEffect: false
@@ -126,6 +132,7 @@ interfaces:
     domain: edu
     method: POST
     path: /reservations/classrooms
+    timeoutClass: write
     purpose: 提交整间教室预约（主轴写入；唯一副作用出口的目的=正向写入）
     requiredIdentity: TEACHER
     sideEffect: true
@@ -155,6 +162,7 @@ interfaces:
     domain: edu
     method: POST
     path: /reservations/seats
+    timeoutClass: write
     purpose: 提交座位预约（纳管留档；作为"粒度差异"的对照，D2：不进入自动编排）
     requiredIdentity: STUDENT
     sideEffect: true
@@ -168,7 +176,7 @@ interfaces:
     preconditions:
       - P-SEAT-EXISTS
       - P-SEAT-SLOT-FREE
-    adapter: reservation-create
+    adapter: reservation-seat-create   # 阶段 1 修正：与教室创建的请求体字段不同（seat_id vs classroom_id），不得共用适配器
     legacyNotes:
       - 学生受信用分级时长上限约束（单次 A/B/C=360/180/120 分钟），超限返回 200+code 400（J4）
       - 座位预约另有 24h 提前窗口；教室预约无此限制
@@ -177,6 +185,7 @@ interfaces:
     domain: edu
     method: GET
     path: /reservations
+    timeoutClass: read
     purpose: 我的预约（F5；前置查重降级路径 + 补偿查证降级路径）
     requiredIdentity: initiator   # 发起时身份（一审更正）：教室预约查证=TEACHER，座位=STUDENT
     sideEffect: false
@@ -195,10 +204,13 @@ interfaces:
     domain: edu
     method: DELETE
     path: /reservations/{id}
+    timeoutClass: write
     purpose: 撤销预约（补偿动作；经补偿清单触发，不直接挂意图步骤）
     requiredIdentity: TEACHER
     sideEffect: true
     autoOrchestration: true    # 补偿动作：经补偿清单引用（第 01 章 §五 三审注）
+    verdictFork: compensation  # W13/D10 分叉（阶段 1 增补字段）：本接口收到 200+400/404 时
+                               # 不判失败，进 recordId 查证——分叉执行在规则表 W4/W13 行内
     idempotentBusinessKey: null
     businessKeyExempt: true    # 对补偿动作可豁免（第 01 章 §四）：重复撤销天然幂等
     verification:
@@ -220,6 +232,7 @@ interfaces:
     domain: logi
     method: GET
     path: /admin/reservations
+    timeoutClass: readHeavyList
     purpose: 管理端全量预约列表（F4；查证支点——跨身份可见）
     requiredIdentity: ADMIN
     sideEffect: false
@@ -242,6 +255,7 @@ interfaces:
     domain: logi
     method: POST
     path: /admin/maintenance
+    timeoutClass: write
     purpose: 创建维修窗口（仅演示场景构造；M8：禁止自动编排清单的唯一成员）
     requiredIdentity: ADMIN
     sideEffect: true

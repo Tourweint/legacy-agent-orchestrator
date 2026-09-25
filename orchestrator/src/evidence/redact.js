@@ -47,3 +47,22 @@ export function makeRedactor(evidenceConstants) {
     redact: (value) => redactDeep(value, { patterns, maxLength }),
   }
 }
+
+// 原始响应文本里的凭证形态：键值对形态（"token":"…"）与 JWT 形态（eyJ… 三段式）
+const SECRET_TEXT_PATTERNS = [
+  [/"(token|access[_-]?token|refresh[_-]?token|authorization|password|secret)"\s*:\s*"[^"]*"/gi, '"$1":"[已剔除]"'],
+  [/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[JWT已剔除]'],
+]
+
+/**
+ * 对"原始响应片段"这类文本做凭证清洗（第 05 章 §八：evidence 不得包含凭证）。
+ * 结构化对象走 redactDeep（按键名剔除）；文本片段里的凭证值只能靠形态匹配剔除。
+ */
+export function scrubTextSecrets(text) {
+  if (typeof text !== 'string') return text
+  let out = text
+  for (const [pattern, replacement] of SECRET_TEXT_PATTERNS) {
+    out = out.replace(pattern, replacement)
+  }
+  return out
+}

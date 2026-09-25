@@ -91,3 +91,24 @@ evidence:
 understanding:
   # 置信度阈值（E1 需实测；倾向 0.55，阶段 5 用样本标定后回填）
   confidenceThreshold: 0.55
+
+# ---- 接触层（阶段 1 新增；实测依据见基线文档 §五/§7.2）----
+contact:
+  # 存量系统 base URL：环境变量优先；真实路径没有 /api 前缀（基线 §8.1）
+  legacyBaseUrlEnv: ORCH_LEGACY_BASE_URL
+  legacyBaseUrlDefault: http://localhost:8080
+  # access token 有效期实测 30 分钟（基线 §五 JWT_ACCESS_EXPIRATION=1800000）；
+  # 提前量用于主动刷新，避免拿注定过期的 token 去撞 401
+  accessTokenTtlMs: 1800000
+  tokenRefreshMarginMs: 300000
+  # 只读重试（C13：2 次、短间隔；不做指数退避）；写操作永不自动重试（M4，规则表 W7/W9/W11）
+  readRetry:
+    maxRetries: 2
+    delayMs: 200
+  # 登录要求的设备头（基线 §7.2 实测：缺设备头登录行为不可预期）；设备标识非凭证，
+  # 可用环境变量覆盖。⚠️ HTTP 头值只允许 ASCII——设备名不是展示文案，默认值用 ASCII；
+  # 同一设备会话上限 APP_AUTH_MAX_DEVICE_SESSIONS=3
+  device:
+    idEnv: ORCH_DEVICE_ID
+    idDefault: orchestrator-engine
+    nameDefault: orchestrator-engine

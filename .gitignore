@@ -36,3 +36,6 @@ npm-debug.log*
 # Editor temp files
 *.tmp
 *.bak
+
+# Runtime data (Redis AOF contains login session tokens — never commit)
+deploy/data/

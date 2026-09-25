@@ -18,6 +18,7 @@ const REQUIRED_INTERFACE_FIELDS = [
 
 const VALID_DOMAINS = ['auth', 'edu', 'logi']
 const SPECIAL_IDENTITIES = ['none', 'initiator'] // initiator = 发起写入时的业务身份（注册表口径，一审更正）
+const VALID_TIMEOUT_CLASSES = ['write', 'read', 'readHeavyList']
 
 export class ConfigError extends Error {
   constructor(message) {
@@ -120,6 +121,9 @@ export class ConfigStore {
       }
       if (typeof it.sideEffect !== 'boolean' || typeof it.autoOrchestration !== 'boolean') {
         throw new ConfigError(`接口 ${it.id} 的 sideEffect/autoOrchestration 必须是布尔值`)
+      }
+      if (it.timeoutClass !== undefined && !VALID_TIMEOUT_CLASSES.includes(it.timeoutClass)) {
+        throw new ConfigError(`接口 ${it.id} 的 timeoutClass 非法: ${it.timeoutClass}`)
       }
       if (it.sideEffect) {
         // N3 硬门槛：有副作用必须可查证
