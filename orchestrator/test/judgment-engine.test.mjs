@@ -9,7 +9,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { makeGateway, ok, httpOnly, UIDS } from './helpers/fake-legacy.js'
+import { makeGateway, ok, httpOnly, UIDS, sessionIdentity } from './helpers/fake-legacy.js'
 import { JudgmentEngine } from '../src/judgment/judgment-engine.js'
 import { ConfigStore } from '../src/config/config-store.js'
 
@@ -53,7 +53,7 @@ const evaluate = (world, target = {}, extra = {}) => {
   return engine.evaluateIntent({
     intentId: 'borrow-classroom',
     target: { classroom: target.classroom ?? { classroomId: 5 }, slot: target.slot ?? SLOT },
-    identity: { id: 'TEACHER' },
+    identity: sessionIdentity('TEACHER'),
     ...extra,
   })
 }
@@ -185,7 +185,7 @@ test('安全阈值（C5/§五.4）：列表超阈且未命中 → 降级为"无�
 test('验收③：两次求值互不串用事实（C10 不缓存）——世界变了结论跟着变', async () => {
   const world = { adminRows: [] }
   const { engine, transport } = makeEngine(world)
-  const call = () => engine.evaluateIntent({ intentId: 'borrow-classroom', target: { classroom: { classroomId: 5 }, slot: SLOT }, identity: { id: 'TEACHER' } })
+  const call = () => engine.evaluateIntent({ intentId: 'borrow-classroom', target: { classroom: { classroomId: 5 }, slot: SLOT }, identity: sessionIdentity('TEACHER') })
 
   const first = await call()
   assert.equal(byId(first, 'P-SLOT-FREE').conclusion, 'SATISFIED')
@@ -225,7 +225,7 @@ test('验收①：新增一条只依赖已有事实的命题 → 只加 YAML，�
     const result = await engine.evaluateIntent({
       intentId: 'borrow-classroom',
       target: { classroom: { classroomId: 5 }, slot: SLOT },
-      identity: { id: 'TEACHER' },
+      identity: sessionIdentity('TEACHER'),
     })
     const newProp = byId(result, 'P-CAPACITY-AT-LEAST-40')
     assert.ok(newProp, '新命题被引擎判定')

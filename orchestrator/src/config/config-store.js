@@ -19,6 +19,7 @@ const REQUIRED_INTERFACE_FIELDS = [
 const VALID_DOMAINS = ['auth', 'edu', 'logi']
 const SPECIAL_IDENTITIES = ['none', 'initiator'] // initiator = 发起写入时的业务身份（注册表口径，一审更正）
 const VALID_TIMEOUT_CLASSES = ['write', 'read', 'readHeavyList']
+const VALID_ROLES = ['ADMIN', 'TEACHER', 'STUDENT'] // 意图的 requiredRole 取值（登录方案决定 4）
 
 export class ConfigError extends Error {
   constructor(message) {
@@ -172,6 +173,15 @@ export class ConfigStore {
       }
       if (ids.has(intent.id)) throw new ConfigError(`意图标识重复: ${intent.id}`)
       ids.add(intent.id)
+      // 角色要求（登录方案决定 4）：声明了就必须是合法角色——权限是配置数据，不散落在代码里
+      if (intent.requiredRole !== undefined && !VALID_ROLES.includes(intent.requiredRole)) {
+        throw new ConfigError(`意图 ${intent.id} 的 requiredRole 非法: ${intent.requiredRole}`)
+      }
+      for (const role of intent.allowedRoles ?? []) {
+        if (!VALID_ROLES.includes(role)) {
+          throw new ConfigError(`意图 ${intent.id} 的 allowedRoles 含非法角色: ${role}`)
+        }
+      }
       if (intent.steps.some((s) => !s.interface)) {
         throw new ConfigError(`意图 ${intent.id} 存在未声明接口的步骤`)
       }

@@ -5,6 +5,12 @@
 // 两条路径汇入同一段编排逻辑（第 03 章 §十）：结构化任务直接进 TaskRunner；
 // 自然语言路径（阶段 5）经理解层产出结构化意图后进入同一个 TaskRunner。
 //
+// 登录（2026-09-25 拓展实现，登录方案影响面 #1/#4/#12/#14/#15）：
+//   · 三个登录端点由 auth-endpoints.js 处理；其余端点**一律要求会话**（未登录 → 4010）
+//   · 身份不再由请求参数决定：写操作走会话本人的存量令牌，只读事实可借服务只读身份
+//   · 任务带 owner（发起人）；回复/取消/查看一个任务时只认它自己的发起人
+//   · identity 请求参数 deprecated：**传了也忽略，不传不再报 4004**（三审拍板）
+//
 // 端点、请求/响应结构、错误码的登记见 docs/基线文档/对外接口清单.md（Gate 3 交付物）。
 
 import { createServer } from 'node:http'
@@ -17,6 +23,7 @@ import { JudgmentEngine } from '../judgment/judgment-engine.js'
 import { TaskRunner } from '../orchestration/task-runner.js'
 import { TaskStore } from './task-store.js'
 import { mapEntryToEvent, sseFrame } from './event-stream.js'
+import { resolveSession, handleAuthRoute, AUTH_ERROR_CODES } from './auth-endpoints.js'
 
 // 错误码（登记于对外接口清单；形状校验错误在这里，可办性判断在判定层）
 export const ERROR_CODES = {
@@ -25,9 +32,11 @@ export const ERROR_CODES = {
   UNKNOWN_INTENT: 4001,
   BAD_RESOURCES: 4002,
   BAD_SLOT: 4003,
-  BAD_IDENTITY: 4004,
+  BAD_IDENTITY: 4004, // deprecated：identity 参数已作废，仅为旧调用方保留码位说明
+  BAD_REQUEST: 4005,
   TASK_NOT_SUSPENDED: 4090,
   TASK_NOT_FOUND: 4040,
+  TASK_NOT_OWNED: 4041, // 任务存在但不属于当前登录用户（不暴露其内容）
   ROUTE_NOT_FOUND: 4044,
   INTERNAL: 5000,
 }
@@ -53,9 +62,9 @@ function readBody(req) {
 }
 
 // ---- 形状校验（只管形状：字段存在与类型；可办性归判定层）----
+// 注意：identity 不再校验——登录后身份由会话派生（三审拍板：传了忽略、不传不报 4004）
 function validateTaskBody(body) {
   if (typeof body.intentId !== 'string' || !body.intentId) return { code: ERROR_CODES.UNKNOWN_INTENT, message: '缺少 intentId' }
-  if (typeof body.identity !== 'string' || !body.identity) return { code: ERROR_CODES.BAD_IDENTITY, message: '缺少 identity（业务身份标识）' }
   if (!Array.isArray(body.resources) || body.resources.length === 0) return { code: ERROR_CODES.BAD_RESOURCES, message: '缺少 resources（至少一个资源目标）' }
   for (const r of body.resources) {
     const c = r?.classroom
@@ -79,19 +88,25 @@ function validateTaskBody(body) {
  * @param {object} deps
  * @param {import('../config/config-store.js').ConfigStore} deps.configStore
  * @param {import('../contact/http-transport.js').HttpTransport} deps.transport  共享传输（唯一出口在接触层）
- * @param {import('../contact/identity-pool.js').IdentityPool} deps.identityPool 共享身份池（token 缓存跨任务）
+ * @param {import('../contact/identity-pool.js').IdentityPool} deps.identityPool 服务身份池（只读事实借用）
+ * @param {import('../contact/user-token-store.js').UserTokenStore} deps.userTokenStore 登录用户令牌
+ * @param {import('./session-store.js').SessionStore} deps.sessionStore  引擎会话
+ * @param {object} [deps.chaos]  混沌控制器（只读暴露 armed，供检查脚本机械断言；P2-2）
  */
-export function createAccessServer({ configStore, transport, identityPool, adapters, llm }) {
+export function createAccessServer({ configStore, transport, identityPool, adapters, llm, userTokenStore, sessionStore, chaos = null }) {
   const llmClient = llm ?? new LlmClient()
   const adapterImpl = adapters ?? new ProtocolAdapters({ configStore })
+  const sessionConstants = configStore.getConstants().session
   // 共享装配（构造期一次）：适配器与身份池跨任务复用；证据链按任务独立
-  const sharedGateway = new ContactGateway({ configStore, transport, identityPool, adapters: adapterImpl })
+  const sharedGateway = new ContactGateway({ configStore, transport, identityPool, userTokenStore, adapters: adapterImpl })
   const taskStore = new TaskStore()
 
   // 每任务运行栈：证据链/网关/判定/理解（留档绑定本任务链）/编排
-  function newTaskStack(taskId) {
+  // 网关视图绑定**本任务的发起人**（登录会话派生）——写操作只认这个人的身份（决定 3）
+  function newTaskStack(taskId, session) {
     const chain = new EvidenceChain({ taskId, evidenceConstants: configStore.getConstants().evidence })
-    const taskGateway = sharedGateway.forTask(chain)
+    const user = { username: session.username, role: session.role }
+    const taskGateway = sharedGateway.forTask(chain, { user })
     const judgment = new JudgmentEngine({ configStore, gateway: taskGateway, evidenceChain: chain })
     const understanding = new UnderstandingEngine({ configStore, llm: llmClient, evidenceChain: chain })
     const runner = new TaskRunner({
@@ -100,8 +115,14 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       judgmentEngine: judgment,
       evidenceChain: chain,
       understandingEngine: understanding,
+      user,
     })
     return { chain, runner }
+  }
+
+  // 登录后身份的规范化形态：写操作走本人令牌（网关按接口声明的 initiator 解析）
+  function identityOf(session) {
+    return { id: session.username, userId: session.userInfo?.id ?? null, role: session.role }
   }
 
   const server = createServer(async (req, res) => {
@@ -110,8 +131,8 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
     try {
       // CORS（开发期前端 5173 跨源；登记于对外接口清单）
       res.setHeader('Access-Control-Allow-Origin', '*')
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID')
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID, Authorization')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
       if (req.method === 'OPTIONS') {
         res.writeHead(204)
         res.end()
@@ -119,12 +140,48 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       }
 
       if (route === 'GET /api/health') {
-        sendJson(res, 200, ERROR_CODES.OK, 'ok', { status: 'ok', tasks: taskStore.tasks.size })
+        sendJson(res, 200, ERROR_CODES.OK, 'ok', {
+          status: 'ok',
+          tasks: taskStore.tasks.size,
+          sessions: sessionStore.size,
+          // 布防状态只读暴露（P2-2）：录制前的机械断言取代"人工提醒"，避免录到未布防的空镜
+          chaos: { armed: chaos?.armed === true },
+        })
         return
+      }
+
+      // ---- 登录端点（无需会话；形状与错误码见 auth-endpoints.js）----
+      if (
+        await handleAuthRoute({
+          req,
+          res,
+          route,
+          deps: { sessionStore, userTokenStore, sessionConstants, sendJson, readBody, errorCodes: ERROR_CODES },
+        })
+      ) {
+        return
+      }
+
+      // ---- 会话中间件（影响面 #15）：其余端点一律要求已登录；未登录 → 4010 ----
+      const session = resolveSession(req, { sessionStore, sessionConstants })
+      const requireSession = () => {
+        if (session) return true
+        sendJson(res, 401, AUTH_ERROR_CODES.UNAUTHORIZED, '未登录（请先登录：POST /api/auth/login）')
+        return false
+      }
+      // 任务归属校验（影响面 #12）：只允许操作自己发起的任务；对他人任务不暴露任何内容
+      const ownedTask = (taskId) => {
+        const task = taskStore.get(taskId)
+        if (!task) return { error: { status: 404, code: ERROR_CODES.TASK_NOT_FOUND, message: '任务不存在' } }
+        if (task.owner && task.owner !== session.username) {
+          return { error: { status: 404, code: ERROR_CODES.TASK_NOT_OWNED, message: '任务不存在（不属于当前登录用户）' } }
+        }
+        return { task }
       }
 
       // 结构化任务入口（无 LLM 路径，第 03 章 §十；G5 调试入口）
       if (route === 'POST /api/tasks') {
+        if (!requireSession()) return
         const raw = await readBody(req)
         let body
         try {
@@ -142,9 +199,10 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         // 每任务独立证据链与运行栈；传输/身份池/适配器共享
         taskSeq += 1
         const taskId = `T-${Date.now()}-${taskSeq}`
-        const { chain, runner } = newTaskStack(taskId)
+        const { chain, runner } = newTaskStack(taskId, session)
         taskStore.register({
           taskId,
+          owner: session.username,
           chain,
           runner,
           run: runner
@@ -153,7 +211,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
               resources: body.resources,
               slot: { start: new Date(body.slot.start), end: new Date(body.slot.end) },
               reason: body.reason,
-              identity: { id: body.identity },
+              identity: identityOf(session),
             })
             .then((result) => {
               taskStore.complete(taskId, result)
@@ -167,6 +225,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
 
       // 自然语言入口（阶段 5 开放）：理解层产出结构化意图后汇入同一资源队列（第 03 章 §十）
       if (route === 'POST /api/chat') {
+        if (!requireSession()) return
         const raw = await readBody(req)
         let body
         try {
@@ -179,20 +238,17 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           sendJson(res, 400, ERROR_CODES.BAD_JSON, '缺少 text（用户原话）')
           return
         }
-        if (typeof body.identity !== 'string' || !body.identity) {
-          sendJson(res, 400, ERROR_CODES.BAD_IDENTITY, '缺少 identity（业务身份标识）')
-          return
-        }
         taskSeq += 1
         const taskId = `T-${Date.now()}-${taskSeq}`
-        const { chain, runner } = newTaskStack(taskId)
+        const { chain, runner } = newTaskStack(taskId, session)
         const task = taskStore.register({
           taskId,
+          owner: session.username,
           chain,
           runner,
           stack: null, // 挂起时由下方回填运行栈
           run: runner
-            .executeChatTask({ text: body.text, identity: { id: body.identity } })
+            .executeChatTask({ text: body.text, identity: identityOf(session) })
             .then((outcome) => {
               if (outcome.suspended) {
                 task.stack = outcome.stack
@@ -211,9 +267,10 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       // 挂起任务的追问回复（B8：AWAIT_CLARIFY 在写请求发出前，取消/回复均生效）
       const replyMatch = /^\/api\/tasks\/([^/]+)\/reply$/.exec(url.pathname)
       if (req.method === 'POST' && replyMatch) {
-        const task = taskStore.get(decodeURIComponent(replyMatch[1]))
-        if (!task) {
-          sendJson(res, 404, ERROR_CODES.TASK_NOT_FOUND, '任务不存在')
+        if (!requireSession()) return
+        const { task, error } = ownedTask(decodeURIComponent(replyMatch[1]))
+        if (error) {
+          sendJson(res, error.status, error.code, error.message)
           return
         }
         if (task.status !== 'suspended') {
@@ -249,9 +306,10 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       // 取消挂起中的任务（B8：写请求发出前生效；提交后的取消是忽略型无边）
       const cancelMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname)
       if (req.method === 'DELETE' && cancelMatch) {
-        const task = taskStore.get(decodeURIComponent(cancelMatch[1]))
-        if (!task) {
-          sendJson(res, 404, ERROR_CODES.TASK_NOT_FOUND, '任务不存在')
+        if (!requireSession()) return
+        const { task, error } = ownedTask(decodeURIComponent(cancelMatch[1]))
+        if (error) {
+          sendJson(res, error.status, error.code, error.message)
           return
         }
         if (task.status !== 'suspended') {
@@ -271,9 +329,10 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       // 任务结果快照（调试/兜底；主通道是事件流）
       const snapshotMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname)
       if (req.method === 'GET' && snapshotMatch) {
-        const task = taskStore.get(decodeURIComponent(snapshotMatch[1]))
-        if (!task) {
-          sendJson(res, 404, ERROR_CODES.TASK_NOT_FOUND, '任务不存在（或进程重启后丢失：任务态不跨会话，A6）')
+        if (!requireSession()) return
+        const { task, error } = ownedTask(decodeURIComponent(snapshotMatch[1]))
+        if (error) {
+          sendJson(res, error.status, error.code, error.message)
           return
         }
         sendJson(res, 200, ERROR_CODES.OK, 'ok', {
@@ -281,6 +340,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           status: task.status,
           result: task.result,
           clarify: task.status === 'suspended' ? task.clarify : undefined,
+          owner: task.owner ?? null,
           createdAt: task.createdAt,
         })
         return
@@ -289,9 +349,10 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       // 证据链导出（§6.3 规格 4：evidenceRef 必须可解析——解析不到按缺陷上报）
       const evidenceMatch = /^\/api\/tasks\/([^/]+)\/evidence$/.exec(url.pathname)
       if (req.method === 'GET' && evidenceMatch) {
-        const task = taskStore.get(decodeURIComponent(evidenceMatch[1]))
-        if (!task) {
-          sendJson(res, 404, ERROR_CODES.TASK_NOT_FOUND, '任务不存在')
+        if (!requireSession()) return
+        const { task, error } = ownedTask(decodeURIComponent(evidenceMatch[1]))
+        if (error) {
+          sendJson(res, error.status, error.code, error.message)
           return
         }
         sendJson(res, 200, ERROR_CODES.OK, 'ok', { taskId: task.taskId, entries: task.entries() })
@@ -301,10 +362,11 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
       // 事件流（SSE）：重放 + 实时；断线续传按 Last-Event-ID / ?lastSeq（§6.3 规格 3）
       const eventsMatch = /^\/api\/tasks\/([^/]+)\/events$/.exec(url.pathname)
       if (req.method === 'GET' && eventsMatch) {
+        if (!requireSession()) return
         const taskId = decodeURIComponent(eventsMatch[1])
-        const task = taskStore.get(taskId)
-        if (!task) {
-          sendJson(res, 404, ERROR_CODES.TASK_NOT_FOUND, '任务不存在')
+        const { task, error } = ownedTask(taskId)
+        if (error) {
+          sendJson(res, error.status, error.code, error.message)
           return
         }
         const lastSeq =
@@ -343,5 +405,5 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
     return task.runner
   }
 
-  return { server, taskStore }
+  return { server, taskStore, sessionStore }
 }

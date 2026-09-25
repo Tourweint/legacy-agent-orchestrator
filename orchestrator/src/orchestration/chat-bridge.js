@@ -10,6 +10,7 @@
 
 import { parseClassroomName } from '../canonical/classroom-name.js'
 import { resolveRelativeRange, checkLegacyTimeConstraints } from '../canonical/time.js'
+import { authorizeIntent, roleLabel } from './intent-authorizer.js'
 
 export class ChatBridge {
   constructor({ configStore, understandingEngine, evidenceChain = null }) {
@@ -81,6 +82,28 @@ export class ChatBridge {
     const intent = this.store.getIntent(understanding.intent)
     taskContext.intent = intent
     taskContext.intentId = intent.id
+
+    // 闸门四（本次新增）：按角色判权限——**在任何调用之前**（决定 5 / I5）。
+    // 放在槽位追问之前：权限不对时不该先去问"哪间教室"——那是多余且误导的交互。
+    const denial = authorizeIntent({ intent, identity: taskContext.identity })
+    if (denial) {
+      taskContext.outcome = { message: denial.message }
+      this.#decide(taskContext, {
+        action: 'decide:intent-forbidden',
+        initiator: taskContext.identity?.id ?? null,
+        actingIdentity: '本人身份',
+        input: {
+          intentId: intent.id,
+          requiredRole: roleLabel(denial.required),
+          actualRole: roleLabel(denial.actual),
+          callsMade: 0,
+        },
+        basis: [{ spec: 'login-permission-plan#decision-5' }],
+        conclusion: { outcome: 'INTENT_FORBIDDEN', summary: denial.message },
+      })
+      machine.fire('INTENT_FORBIDDEN') // UNDERSTANDING → REJECTED（未发出任何调用）
+      return
+    }
     const missing = (intent.slots?.required ?? []).filter(
       (key) => taskContext.slots[key] === undefined || taskContext.slots[key] === '',
     )

@@ -10,7 +10,7 @@ import { buildSystemPrompt } from '../src/understanding/prompt.js'
 import { ConfigStore } from '../src/config/config-store.js'
 import { parseClassroomName } from '../src/canonical/classroom-name.js'
 import { TaskRunner } from '../src/orchestration/task-runner.js'
-import { makeGateway, ok, UIDS } from './helpers/fake-legacy.js'
+import { makeGateway, ok, UIDS, sessionIdentity } from './helpers/fake-legacy.js'
 
 const store = new ConfigStore()
 
@@ -180,7 +180,7 @@ test('验收①：结构化路径零 LLM 调用（去掉理解层链路完整可
     intentId: 'borrow-classroom',
     resources: [{ classroom: { classroomId: 4 } }],
     slot: { start: new Date('2026-09-30T05:00:00Z'), end: new Date('2026-09-30T06:00:00Z') },
-    identity: { id: 'TEACHER' },
+    identity: sessionIdentity('TEACHER'),
   })
   assert.equal(result.terminal, 'DONE')
   assert.equal(llm.calls.length, 0) // 理解层零参与
@@ -188,7 +188,7 @@ test('验收①：结构化路径零 LLM 调用（去掉理解层链路完整可
 
 test('聊天全流程：一句话 → 全部槽位齐备 → 真实办理 → DONE', async () => {
   const { runner, chain } = makeChatRunner({}, [validOutput()])
-  const outcome = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: { id: 'TEACHER' } })
+  const outcome = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: sessionIdentity('TEACHER') })
   assert.ok(!outcome.suspended)
   assert.equal(outcome.result.terminal, 'DONE')
   assert.ok(outcome.result.conclusion.includes('#120'))
@@ -204,7 +204,7 @@ test('追问循环：缺时段 → 挂起追问 → 回复补齐 → 恢复办�
     validOutput({ slots: { classroomName: '数智楼222', datePhrase: '下周三' } }), // 缺 timeSegment
     validOutput(), // 回复后模型补全
   ])
-  const first = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: { id: 'TEACHER' } })
+  const first = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: sessionIdentity('TEACHER') })
   assert.ok(first.suspended)
   assert.equal(first.clarify.kind, 'missing-slots')
   assert.deepEqual(first.clarify.missing, ['timeSegment'])
@@ -221,7 +221,7 @@ test('追问循环：缺时段 → 挂起追问 → 回复补齐 → 恢复办�
 test('追问上限：连续 3 轮无法补齐 → CLARIFY_LIMIT → REJECTED（§8.2）', async () => {
   const empty = { intent: 'borrow-classroom', slots: {}, confidence: 0.9, outOfDomain: false }
   const { runner } = makeChatRunner({}, [empty, empty, empty, empty])
-  const first = await runner.executeChatTask({ text: '帮我借教室', identity: { id: 'TEACHER' } })
+  const first = await runner.executeChatTask({ text: '帮我借教室', identity: sessionIdentity('TEACHER') })
   assert.ok(first.suspended)
   let outcome = await runner.resumeChat({ stack: first.stack, replyText: '不知道' })
   assert.ok(outcome.suspended)
@@ -237,7 +237,7 @@ test('超域拒答：饭卡充值 → OUT_OF_DOMAIN → REJECTED，不追问（�
   const { runner } = makeChatRunner({}, [
     { intent: null, slots: {}, confidence: 0.95, outOfDomain: true, reasoning: '涉及金钱' },
   ])
-  const outcome = await runner.executeChatTask({ text: '帮我的饭卡充两百块钱', identity: { id: 'TEACHER' } })
+  const outcome = await runner.executeChatTask({ text: '帮我的饭卡充两百块钱', identity: sessionIdentity('TEACHER') })
   assert.ok(!outcome.suspended)
   assert.equal(outcome.result.terminal, 'REJECTED')
   assert.ok(outcome.result.conclusion.includes('超出'))
@@ -245,7 +245,7 @@ test('超域拒答：饭卡充值 → OUT_OF_DOMAIN → REJECTED，不追问（�
 
 test('取消挂起任务：B8 写请求前取消生效 → REJECTED', async () => {
   const { runner } = makeChatRunner({}, [validOutput({ slots: { classroomName: '数智楼222', datePhrase: '下周三' } })])
-  const first = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: { id: 'TEACHER' } })
+  const first = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: sessionIdentity('TEACHER') })
   assert.ok(first.suspended)
   const { result } = runner.cancelChat({ stack: first.stack })
   assert.equal(result.terminal, 'REJECTED')
@@ -272,7 +272,7 @@ test('闸门三机械算缺：模型漏报 missing 也不影响（缺口由计�
     evidenceChain: chain,
     understandingEngine: understanding,
   })
-  const outcome = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: { id: 'TEACHER' } })
+  const outcome = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: sessionIdentity('TEACHER') })
   assert.ok(outcome.suspended)
   assert.deepEqual(outcome.clarify.missing, ['timeSegment']) // 闸门三：机械计算的缺口
   void UIDS

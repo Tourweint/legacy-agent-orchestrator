@@ -7,7 +7,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { makeGateway, ok, httpOnly, envelope, UIDS } from './helpers/fake-legacy.js'
+import { makeGateway, ok, httpOnly, envelope, UIDS, sessionIdentity } from './helpers/fake-legacy.js'
 import { JudgmentEngine } from '../src/judgment/judgment-engine.js'
 import { TaskRunner } from '../src/orchestration/task-runner.js'
 import { TaskMachine } from '../src/orchestration/state-machine.js'
@@ -71,7 +71,7 @@ function makeRunner(world = {}) {
 
 const execute = (world, resources, intentId = 'borrow-classroom') => {
   const { runner } = makeRunner(world)
-  return runner.executeTask({ intentId, resources, slot: SLOT, identity: { id: 'TEACHER' } })
+  return runner.executeTask({ intentId, resources, slot: SLOT, identity: sessionIdentity('TEACHER') })
 }
 
 test('正常链路：单资源提交成功 → 任务 DONE，预约 #120 入补偿清单（未撤销）', async () => {
@@ -91,7 +91,7 @@ test('只读意图：CHECK_ONLY → DONE，全程零写调用', async () => {
     intentId: 'query-classroom-availability',
     resources: [{ classroom: { classroomId: 5 } }],
     slot: SLOT,
-    identity: { id: 'TEACHER' },
+    identity: sessionIdentity('TEACHER'),
   })
   assert.equal(result.terminal, 'DONE')
   assert.ok(result.results[0].message.includes('可以使用'))
@@ -298,7 +298,7 @@ test('步数预算兜底（K1）：上限调到 5 后正常链路被强制 UNRES
       intentId: 'borrow-classroom',
       resources: [{ classroom: { classroomId: 5 } }],
       slot: SLOT,
-      identity: { id: 'TEACHER' },
+      identity: sessionIdentity('TEACHER'),
     })
     assert.equal(result.terminal, 'UNRESOLVED')
     assert.ok(result.conclusion.includes('人工介入'))
@@ -315,7 +315,7 @@ test('证据链完整性：一次 DONE 任务的链含收集/判定/调用/决�
     intentId: 'borrow-classroom',
     resources: [{ classroom: { classroomId: 5 } }],
     slot: SLOT,
-    identity: { id: 'TEACHER' },
+    identity: sessionIdentity('TEACHER'),
   })
   assert.equal(result.terminal, 'DONE')
   const actions = chain.getEntries().map((e) => e.action)

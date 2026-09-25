@@ -15,6 +15,11 @@ intents:
   - id: borrow-classroom
     name: 借教室
     readOnly: false
+    # 角色要求（登录方案决定 4/5）：整间教室的预约写操作只对教师开放。
+    # 学生发起 → 在任何调用之前有依据拒绝，并给出替代动作（不是"操作失败"）。
+    requiredRole: TEACHER
+    roleDeniedMessage: 整间教室的预约只能由教师提交，您的账号是学生身份。我可以帮您查这间教室的空闲情况，或者帮您排这个时段的座位候补。
+    roleAlternatives: [query-classroom-availability]
     # D7（决策汇总 §四）：一次借两间教室是合法输入——多资源由编排层按计划顺序
     # 组合多次运行，每运行承载一个资源生命周期（第 04 章 §5.8）
     multiResource: true

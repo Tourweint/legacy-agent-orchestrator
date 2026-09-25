@@ -61,6 +61,22 @@ export class IdentityPool {
     return this.#cache.get(identityId)?.userInfo ?? null
   }
 
+  /**
+   * 启动自检：声明了密码环境变量、但环境里根本没有的身份。
+   * 为什么要有它：服务只读身份的凭据缺了，引擎不会"降级"，而是每个任务都以
+   * "任务异常终止"收场——进程看起来是好的，界面却什么都办不成，属于最难排查的一类故障。
+   * 返回 [{id, envName}]，由入口决定是否拒绝启动。
+   */
+  missingCredentials() {
+    const out = []
+    for (const identity of this.store.identityList) {
+      const envName = identity.credentials?.passwordEnv
+      if (!envName) continue
+      if (!process.env[envName]) out.push({ id: identity.id, envName })
+    }
+    return out
+  }
+
   /** 读接口 401 后由 contact-gateway 调用：丢弃当前 token，下次取用重新登录。 */
   invalidate(identityId) {
     this.#cache.delete(identityId)

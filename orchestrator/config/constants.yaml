@@ -112,3 +112,11 @@ contact:
     idEnv: ORCH_DEVICE_ID
     idDefault: orchestrator-engine
     nameDefault: orchestrator-engine
+
+# ---- 引擎会话（登录方案；影响面 #1/#2/#15）----
+# 说明：用户用**存量系统账号**登录，令牌只留在引擎内；引擎给前端自己的会话令牌（Cookie）。
+# 纪律：会话只存身份，不存凭证（凭证由接触层 user-token-store 持有，M6）
+session:
+  idleTimeoutMs: 7200000        # 空闲超时（决定 6：超时后要求重新登录）；演示 2 小时足够
+  cookieName: orch_session      # 会话令牌 Cookie 名（SSE 走 Cookie——EventSource 不能带自定义头，三审拍板）
+  cookieMaxAgeMs: 28800000      # Cookie 有效期 8 小时（仅浏览器侧过期；真正的失效以引擎会话为准）

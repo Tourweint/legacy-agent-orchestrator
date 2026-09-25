@@ -104,6 +104,18 @@ export class ProtocolAdapters {
       rest: { body: { username: requireParam(params, 'username', '登录缺少 username'), password: requireParam(params, 'password', '登录缺少 password') } },
     }),
 
+    // 会话续期（登录方案）：body 只有 refreshToken；源码核验 RefreshTokenDTO 仅此一字段
+    'auth-refresh': (params) => ({
+      pathVars: {},
+      rest: { body: { refreshToken: requireParam(params, 'refreshToken', '续期缺少 refreshToken') } },
+    }),
+
+    // 登出：请求体同样是 refreshToken（不是 access token）——源码核验 AuthController.logout
+    'auth-logout': (params) => ({
+      pathVars: {},
+      rest: { body: { refreshToken: requireParam(params, 'refreshToken', '登出缺少 refreshToken') } },
+    }),
+
     'classroom-detail': (params) => ({
       pathVars: { id: requireParam(params, 'classroomId', '缺少教室 id（classroomId）') },
       rest: {},

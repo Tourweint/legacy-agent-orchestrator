@@ -5,6 +5,7 @@
 import { defineStore } from 'pinia'
 import { apiCancel, apiChat, apiEvidence, apiGetTask, apiPostTask, apiReply } from '../api/client.js'
 import { openTaskStream } from '../api/sse.js'
+import { useSessionStore } from './session.js'
 
 export const PHASES = [
   { key: 'P1', name: '理解', hint: '把你的话解析成意图与槽位' },
@@ -102,11 +103,23 @@ export const useTaskStore = defineStore('task', {
       }
     },
 
-    async startChat(text, identity = 'TEACHER') {
+    /**
+     * 会话失效的统一出口（N5）：401 = 未登录或登录已失效。
+     * 不假装还登录着、不静默重试——退回登录页并说明"登录已过期，请重新登录"。
+     */
+    _handleAuthError(res) {
+      if (res.httpStatus !== 401) return false
+      useSessionStore().markExpired('登录已过期，请重新登录。')
+      return true
+    },
+
+    async startChat(text) {
       this._reset()
       this.userMessages.push({ role: 'user', text })
-      const res = await apiChat(text, identity)
+      // 身份由会话派生（不再传 identity）——写操作只认登录者本人
+      const res = await apiChat(text)
       if (res.code !== 0) {
+        if (this._handleAuthError(res)) return
         this.error = res.message
         return
       }
@@ -121,6 +134,7 @@ export const useTaskStore = defineStore('task', {
       this.userMessages.push({ role: 'user', text: '[调试] 结构化任务' })
       const res = await apiPostTask(task)
       if (res.code !== 0) {
+        if (this._handleAuthError(res)) return
         this.error = res.message
         return
       }
@@ -135,7 +149,8 @@ export const useTaskStore = defineStore('task', {
       this.userMessages.push({ role: 'user', text })
       this.clarify = null
       this.taskStatus = 'running'
-      await apiReply(this.taskId, text)
+      const res = await apiReply(this.taskId, text)
+      if (this._handleAuthError(res)) return
       this._refreshWhileRunning()
     },
 
@@ -147,7 +162,7 @@ export const useTaskStore = defineStore('task', {
         this.result = res.data
         this.clarify = null
         await this._loadFinal(this.taskId)
-      } else {
+      } else if (!this._handleAuthError(res)) {
         this.error = res.message
       }
     },

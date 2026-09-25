@@ -64,8 +64,11 @@ export class EvidenceChain {
    *                                   仅随证据条目留档，不参与判定（阶段 1 增补）
    * @param {string} [entry.phase]    轨迹阶段标记（P1–P6，与第 10 章 §6.3 事件流同源；
    *                                   阶段 4 增补——界面想看的信息补在证据链上，§6.1）
+   * @param {string|null} [entry.initiator]      发起人（登录用户名；服务自身动作传 null）
+   *                                   登录方案影响面 #13：证据必须能回答"这是谁发起的事"
+   * @param {string|null} [entry.actingIdentity] 本次实际使用的身份（本人身份 / 服务只读身份）
    */
-  record({ action, input, basis, conclusion, metadata, phase }) {
+  record({ action, input, basis, conclusion, metadata, phase, initiator, actingIdentity }) {
     if (!action) throw new EvidenceError('证据条目缺 action')
     if (!Array.isArray(basis) || basis.length === 0) {
       // 为什么强制：I4——"为什么做了这一步"必须永远可回答；没有依据的动作不允许发生
@@ -94,6 +97,9 @@ export class EvidenceChain {
       taskId: this.taskId,
       at: this.now().toISOString(), // 时刻：绝对时刻记录，展示层再转本地（第 06 章 §6.3）
       action,
+      // 发起人与实际使用身份（登录方案 #13）：只在调用方显式给出时出现，避免给旧条目伪造字段
+      ...(initiator !== undefined ? { initiator } : {}),
+      ...(actingIdentity !== undefined ? { actingIdentity } : {}),
       input: this.redactor.redact(input ?? null),
       basis: this.redactor.redact(basis),
       conclusion: this.redactor.redact(conclusion),

@@ -28,7 +28,52 @@ interfaces:
     legacyNotes:
       - 上游文档给的 student01/student01 账号是错的（实测 401）；可用账号见根 README
       - 真实路径没有 /api 前缀（上游文档 6 处不一致之一）
-      - access token 实测有效期 30 分钟；不新增纳管 refresh 接口（J5）
+      - access token 实测有效期 30 分钟
+      - 登录响应含 accessToken + refreshToken + userInfo（role/creditLevel/个人时长上限）——
+        openapi 写的 "token" 与实现不符（上游文档不一致，见基线文档 §九）
+      - 缺 X-Device-Id 时回落为 unknown-device（多个无头登录会共享同一设备名额，是隐性坑）
+
+  - id: auth.refresh
+    domain: auth
+    method: POST
+    path: /auth/refresh
+    timeoutClass: read
+    purpose: 用刷新令牌续期（登录会话的续期路径；三审拍板"自动续期一次"的落实处）
+    requiredIdentity: none
+    sideEffect: false          # 会话级操作，不涉及任何业务数据——理由见 legacyNotes 第 1 条
+    autoOrchestration: false   # 不被意图计划引用；由接触层 user-token-store 按需调用
+    idempotentBusinessKey: null
+    verification: null
+    compensation: null
+    preconditions: []
+    adapter: auth-refresh
+    legacyNotes:
+      - 为什么标 sideEffect:false——它改的是 Redis 里的会话记录，不是存量业务数据；
+        N3/N4 门槛针对的是"会被别人看见的业务写入"，此处无查证/补偿语义（同 auth.login 口径）
+      - 源码核验（AuthController L137-147 + TokenServiceImpl.rotateRefreshToken）：接口存在，
+        且**轮换**刷新令牌——旧的一次性作废
+      - 设备不匹配返回 401（refreshToken 设备不匹配）；跳过认证过滤器，无 access token 也能调
+      - ⚠️ 此前文档结论"存量系统无刷新令牌接口"是错的：该结论是三审"会话内存存明文密码"
+        的唯一理由，故实现改为刷新令牌续期（见 docs/变更记录 登录实现登记）
+
+  - id: auth.logout
+    domain: auth
+    method: POST
+    path: /auth/logout
+    timeoutClass: read
+    purpose: 撤销本人的那个设备会话（登出）；引擎登出时同步调用，避免残留占用设备名额
+    requiredIdentity: none
+    sideEffect: false          # 同 auth.refresh：会话级，不是业务数据
+    autoOrchestration: false   # 不被意图计划引用；由接入层登出端点调用
+    idempotentBusinessKey: null
+    verification: null
+    compensation: null
+    preconditions: []
+    adapter: auth-logout
+    legacyNotes:
+      - 请求体是 refreshToken（不是 access token）；成功即撤销该设备会话并删除刷新令牌哈希
+      - 跳过认证过滤器（JwtAuthenticationFilter.shouldNotFilter）——access token 已过期时仍可登出
+      - 撤销成功后该设备上的 access token 立即失效（过滤器查 isDeviceSessionActive 为假 → 401）
 
   # ── 2~5 ── 事实查询（教务侧 edu）─────────────────────────────────────────
   - id: edu.classroom.detail
@@ -134,7 +179,7 @@ interfaces:
     path: /reservations/classrooms
     timeoutClass: write
     purpose: 提交整间教室预约（主轴写入；唯一副作用出口的目的=正向写入）
-    requiredIdentity: TEACHER
+    requiredIdentity: initiator  # 登录后：写操作只认登录者本人（登录方案决定 3）——不再是固定的教师账号
     sideEffect: true
     autoOrchestration: true
     idempotentBusinessKey: 身份+教室+时段   # 三元组（第 06 章 §二）；资源用系统 id
@@ -164,7 +209,7 @@ interfaces:
     path: /reservations/seats
     timeoutClass: write
     purpose: 提交座位预约（纳管留档；作为"粒度差异"的对照，D2：不进入自动编排）
-    requiredIdentity: STUDENT
+    requiredIdentity: initiator  # 座位预约的发起人就是登录者本人（学生或教师），不再写死 STUDENT
     sideEffect: true
     autoOrchestration: false   # D2：座位预约不是主链路，不被任何意图计划引用（自检项 8）
     idempotentBusinessKey: 身份+座位+时段
@@ -187,7 +232,8 @@ interfaces:
     path: /reservations
     timeoutClass: read
     purpose: 我的预约（F5；前置查重降级路径 + 补偿查证降级路径）
-    requiredIdentity: initiator   # 发起时身份（一审更正）：教室预约查证=TEACHER，座位=STUDENT
+    requiredIdentity: initiator   # 登录者本人（登录方案决定 3）：查证必须与发起写入时的同一身份
+                                  # （只返回当前身份的 ACTIVE 记录——因此不能被服务身份替代）
     sideEffect: false
     autoOrchestration: true
     idempotentBusinessKey: null
@@ -206,7 +252,8 @@ interfaces:
     path: /reservations/{id}
     timeoutClass: write
     purpose: 撤销预约（补偿动作；经补偿清单触发，不直接挂意图步骤）
-    requiredIdentity: TEACHER
+    requiredIdentity: initiator  # 撤销接口只认"当前登录者自己的"记录（openapi）——因此必须用本人身份；
+                                 # 撤别人的记录只能走管理员撤销接口（C14），不在这里
     sideEffect: true
     autoOrchestration: true    # 补偿动作：经补偿清单引用（第 01 章 §五 三审注）
     verdictFork: compensation  # W13/D10 分叉（阶段 1 增补字段）：本接口收到 200+400/404 时

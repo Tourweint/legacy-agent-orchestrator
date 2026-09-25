@@ -6,12 +6,19 @@ import { EventStream, mapEntryToEvent } from './event-stream.js'
 export class TaskStore {
   constructor() {
     this.stream = new EventStream()
-    this.tasks = new Map() // taskId → { taskId, status: 'running'|'terminal', result, entries(), createdAt }
+    this.tasks = new Map() // taskId → { taskId, status, result, owner, entries(), createdAt }
   }
 
-  register({ taskId, chain, run, stack, runner }) {
+  /**
+   * @param {object} p
+   * @param {string} p.taskId
+   * @param {string} [p.owner] 发起人（登录用户名；登录方案影响面 #12）——
+   *        用于"只能取消/查看自己的任务"；任务仍不跨会话（A6 不变）
+   */
+  register({ taskId, owner = null, chain, run, stack, runner }) {
     const task = {
       taskId,
+      owner,
       status: 'running',
       result: null,
       runner, // 恢复/取消操作经它进入编排层

@@ -46,6 +46,8 @@ events:
   - USER_REPLIED
   - USER_CANCELLED
   - CLARIFY_LIMIT
+  - INTENT_FORBIDDEN           # 越权拒绝（登录方案决定 5）：发生在任何调用之前——IDLE（结构化）
+                               # 与 UNDERSTANDING（自然语言）两条入口各有出边直落 REJECTED
   # 事实与判定阶段（§4.2）
   - ENTITY_RESOLVED
   - ENTITY_UNRESOLVED
@@ -78,12 +80,14 @@ events:
 
 edges:
 
-  # ── IDLE（恰好两条出边：自然语言 / 结构化任务，第 04 章 §5.1 注）────────────
+  # ── IDLE（出边：自然语言 / 结构化任务 / 越权拒绝，第 04 章 §5.1 注）────────
   - { from: IDLE, event: START,        to: UNDERSTANDING }
   - { from: IDLE, event: START_STRUCT, to: RESOLVING }      # 无 LLM 路径（第 03 章 §十）
+  - { from: IDLE, event: INTENT_FORBIDDEN, to: REJECTED }   # 结构化入口的越权拒绝（调用前）
 
   # ── 理解 ────────────────────────────────────────────────────────────────
   - { from: UNDERSTANDING, event: INTENT_RESOLVED,    to: RESOLVING }
+  - { from: UNDERSTANDING, event: INTENT_FORBIDDEN,   to: REJECTED }  # 自然语言入口的越权拒绝
   - { from: UNDERSTANDING, event: SLOTS_INCOMPLETE,   to: AWAIT_CLARIFY }
   - { from: UNDERSTANDING, event: OUT_OF_DOMAIN,      to: REJECTED }
   - { from: UNDERSTANDING, event: UNDERSTAND_FAILED,  to: REJECTED }

@@ -1,8 +1,16 @@
 <script setup>
-import { ref } from 'vue'
+// 应用外壳 —— 2026-09-26 登录上线后新增一道闸门：未登录不进主界面。
+// 进入时先问一次"我是谁"（会话可能还在），会话失效则退回登录页并给"人话"提示。
+import { onMounted, ref } from 'vue'
 import ChatPane from './components/ChatPane.vue'
 import TrajectoryPane from './components/TrajectoryPane.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
+import LoginView from './views/LoginView.vue'
+import { useSessionStore } from './stores/session.js'
+import { useTaskStore } from './stores/task.js'
+
+const session = useSessionStore()
+const task = useTaskStore()
 
 const theme = ref(localStorage.getItem('theme') ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
 document.documentElement.dataset.theme = theme.value
@@ -12,6 +20,15 @@ function toggleTheme() {
   document.documentElement.dataset.theme = theme.value
   localStorage.setItem('theme', theme.value)
 }
+
+async function logout() {
+  task._reset() // 换个人登录不该看见上一个人的任务
+  await session.logout()
+}
+
+onMounted(() => {
+  session.restore()
+})
 </script>
 
 <template>
@@ -21,10 +38,21 @@ function toggleTheme() {
         <div class="brand">校园教室代办</div>
         <div class="tagline">每一步都看得见依据 · 可解释可恢复</div>
       </div>
-      <ThemeToggle :theme="theme" @toggle="toggleTheme" />
+      <div class="top-right">
+        <div v-if="session.isLoggedIn" class="who">
+          <span class="role">{{ session.roleLabel }}</span>
+          <span class="name">{{ session.displayName }}</span>
+          <button class="link" type="button" @click="logout">退出登录</button>
+        </div>
+        <ThemeToggle :theme="theme" @toggle="toggleTheme" />
+      </div>
     </header>
 
-    <main class="views">
+    <main v-if="session.status === 'unknown' || session.status === 'checking'" class="booting">
+      正在确认登录状态…
+    </main>
+    <LoginView v-else-if="!session.isLoggedIn" />
+    <main v-else class="views">
       <ChatPane />
       <TrajectoryPane />
     </main>
@@ -55,6 +83,49 @@ function toggleTheme() {
   color: var(--text-muted);
   font-size: 12px;
   margin-top: 2px;
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+.role {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-weight: 600;
+}
+
+.name {
+  color: var(--text-muted);
+}
+
+.link {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.booting {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: var(--space-6) 0;
 }
 
 .views {

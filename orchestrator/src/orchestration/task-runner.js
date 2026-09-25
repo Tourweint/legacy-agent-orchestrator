@@ -13,17 +13,19 @@
 // 挂起（AWAIT_CLARIFY）时任务保留机器与上下文，恢复后继续同一资源队列。
 
 import { OrchestrationError } from './orchestration-error.js'
+import { authorizeIntent, roleLabel } from './intent-authorizer.js'
 import { TaskMachine } from './state-machine.js'
 import { RunEngine } from './run-engine.js'
 import { Verifier } from './verifier.js'
 import { ChatBridge } from './chat-bridge.js'
 
 export class TaskRunner {
-  constructor({ configStore, gateway, judgmentEngine, evidenceChain, understandingEngine, now = () => new Date() }) {
+  constructor({ configStore, gateway, judgmentEngine, evidenceChain, understandingEngine, user = null, now = () => new Date() }) {
     this.store = configStore
     this.gateway = gateway
     this.judgment = judgmentEngine
     this.evidenceChain = evidenceChain
+    this.user = user // 发起人（登录会话派生）；角色鉴权用（决定 4/5）
     this.now = now
     this.verifier = new Verifier({ configStore, gateway })
     this.understandingEngine = understandingEngine
@@ -73,6 +75,9 @@ export class TaskRunner {
     if (!Array.isArray(resources) || resources.length === 0) {
       throw new OrchestrationError('任务缺少资源列表')
     }
+    // 越权拒绝发生在任何调用之前（决定 5）：结构化入口在 IDLE 态直接落 REJECTED，不发任何请求
+    const denial = authorizeIntent({ intent, identity: this.#identityWithRole(identity) })
+    if (denial) return this.#rejectForbidden({ intent, denial, identity })
     const stack = this.#newStack()
     stack.taskContext.intent = intent
     stack.taskContext.intentId = intent.id
@@ -142,6 +147,43 @@ export class TaskRunner {
       queue: (stack.taskContext.chat.resources ?? []).slice(1),
       startStateForFirst: 'GATHERING',
     })
+  }
+
+  /** 角色取"任务发起人"的声明，其次取编排层装配的 user（两条来源一致；测试可只给 identity）。 */
+  #identityWithRole(identity) {
+    return { ...identity, role: identity?.role ?? this.user?.role ?? null }
+  }
+
+  /**
+   * 越权拒绝（决定 5）：有依据地拒绝 + 给出替代动作，**不发起任何调用**（I5：不重试、不降级猜测）。
+   * 结构化入口从 IDLE 落 REJECTED；自然语言入口的同类拒绝在理解桥里（它才知道意图是什么）。
+   */
+  #rejectForbidden({ intent, denial, identity }) {
+    const stack = this.#newStack()
+    stack.taskContext.intent = intent
+    stack.taskContext.intentId = intent.id
+    stack.taskContext.identity = identity
+    const { machine, taskContext } = stack
+    machine.begin('IDLE', 'forward')
+    taskContext.outcome = { message: denial.message }
+    taskContext.results.push({ resource: '—', terminal: 'REJECTED', message: denial.message })
+    const entry = this.evidenceChain?.record({
+      phase: 'P1',
+      action: 'decide:intent-forbidden',
+      initiator: identity?.id ?? null,
+      actingIdentity: '本人身份',
+      input: {
+        intentId: intent.id,
+        requiredRole: roleLabel(denial.required),
+        actualRole: roleLabel(denial.actual),
+        callsMade: 0, // 关键证据：拒绝发生在任何调用之前
+      },
+      basis: [{ spec: 'login-permission-plan#decision-5' }],
+      conclusion: { outcome: 'INTENT_FORBIDDEN', summary: denial.message },
+    })
+    if (entry) taskContext.lastDecisionSeq = entry.seq
+    machine.fire('INTENT_FORBIDDEN')
+    return this.#finish(stack, 'REJECTED')
   }
 
   /** 取消挂起中的任务（B8：写请求发出前取消才生效——AWAIT_CLARIFY 必然在提交前）。 */

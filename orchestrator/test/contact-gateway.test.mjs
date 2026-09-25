@@ -123,16 +123,43 @@ test('W13 分叉走通：补偿撤销收到 200+404 → UNKNOWN（进 recordId �
   assert.equal(createResult.reasonCode, 'resource-not-found')
 })
 
-test('initiator 身份：mine 查证必须用发起时身份；缺失即本地报错', async () => {
+test('initiator 身份：mine 查证必须用登录者本人；没有登录用户即本地报错（不借用任何身份）', async () => {
   const { gateway, transport } = makeGateway(() => ok([]))
-  await assert.rejects(
-    () => gateway.call('edu.reservation.mine', {}),
-    (err) => err instanceof ContactError && /发起时身份/.test(err.message),
-  )
-  const result = await gateway.call('edu.reservation.mine', {}, { initiatorIdentity: 'TEACHER' })
+  const result = await gateway.call('edu.reservation.mine', {})
   assert.equal(result.verdict, 'SUCCESS')
   const readCall = transport.callsTo('/reservations')[0]
-  assert.equal(readCall.headers.Authorization, 'Bearer tok-233') // TEACHER 绑定账号 233
+  assert.equal(readCall.headers.Authorization, 'Bearer tok-233') // 登录用户 233 本人的令牌
+
+  // 无登录用户的网关：initiator 调用必须在本地被拒（I5：无权限时不降级猜测、不借用服务身份）
+  const anonymous = makeGateway(() => ok([]), { user: null })
+  await assert.rejects(
+    () => anonymous.gateway.call('edu.reservation.mine', {}),
+    (err) => err instanceof ContactError && /登录者本人身份/.test(err.message),
+  )
+  assert.equal(anonymous.transport.callsTo('/reservations').length, 0) // 一个请求都没发出
+})
+
+test('写操作不得借用服务身份：有副作用的接口声明成 TEACHER/STUDENT 时本地拒绝（I5）', async () => {
+  const { gateway, store, transport } = makeGateway(() => ok({}))
+  const registry = store.registry.interfaces
+  // 直接在内存里把写接口声明改成服务身份，验证守卫而不是靠"配置恰好写对"
+  const target = registry.find((it) => it.id === 'edu.reservation.classroom.create')
+  const original = target.requiredIdentity
+  target.requiredIdentity = 'TEACHER'
+  try {
+    await assert.rejects(
+      () =>
+        gateway.call('edu.reservation.classroom.create', {
+          classroomId: 5,
+          start: new Date(Date.UTC(2026, 8, 30, 5, 0)),
+          end: new Date(Date.UTC(2026, 8, 30, 6, 0)),
+        }),
+      (err) => err instanceof ContactError && /写操作只认登录者本人/.test(err.message),
+    )
+    assert.equal(transport.callsTo('/reservations/classrooms').length, 0)
+  } finally {
+    target.requiredIdentity = original
+  }
 })
 
 test('M3 拦截在发出任何请求之前：参数不合格时零 HTTP', async () => {

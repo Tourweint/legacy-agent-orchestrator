@@ -247,10 +247,11 @@ export class RunEngine {
     }
     // 补偿撤销：撤销动作来自意图计划的 compensation 声明
     const item = taskContext.currentCompensation
+    // 撤销一律以**登录者本人**身份发出（registry: initiator）——只能撤销自己的记录（I5）
     const r = await this.gateway.call(
       taskContext.intent.compensation.action,
       { recordId: item.recordId },
-      { initiatorIdentity: item.identityId, phase: 'P5' },
+      { phase: 'P5' },
     )
     taskContext.lastCall = r
     this.#fireCallOutcome(machine, r, { recordId: item.recordId })

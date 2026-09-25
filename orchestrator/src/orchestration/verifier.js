@@ -26,7 +26,8 @@ export class Verifier {
    */
   async verifyForward({ intent, target, identity, phase = 'P4' }) {
     const plan = this.#verificationPlan(intent)
-    const primary = await this.gateway.call(plan.primary.interface, {}, { initiatorIdentity: plan.primary.identity === 'initiator' ? identity.id : undefined, phase })
+    // 身份由网关按接口声明解析（initiator → 登录者本人；ADMIN → 服务只读身份），调用方不再传
+    const primary = await this.gateway.call(plan.primary.interface, {}, { phase })
     const basis = [{ fact: 'F4' }]
 
     if (primary.verdict === 'SUCCESS') {
@@ -44,7 +45,7 @@ export class Verifier {
     }
 
     // 首选路径失败 → 降级 mine（发起时身份）：未命中不能作结论（§五——它看不见别人的记录）
-    const fallback = await this.gateway.call(plan.fallback.interface, {}, { initiatorIdentity: identity.id, phase })
+    const fallback = await this.gateway.call(plan.fallback.interface, {}, { phase })
     if (fallback.verdict === 'SUCCESS') {
       const hit = this.#scanForward(fallback.data ?? [], target, identity.userId, { selfOnly: true })
       if (hit) {

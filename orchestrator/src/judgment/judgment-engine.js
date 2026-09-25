@@ -57,10 +57,15 @@ export class JudgmentEngine {
     // writer:self 的命题会走"无法确认"处置（见 overlap-exists 算子）
     let userId = identity?.userId ?? null
     if (userId == null && needed.has('F4')) {
-      try {
-        userId = (await this.gateway.pool.getUserInfo(identity.id))?.id ?? null
-      } catch {
-        userId = null
+      // 登录后发起人 = 登录者本人：其数字 id 通常已由接入层随会话传入；
+      // 缺失时从接触层的用户令牌注册表补（服务身份池是兜底，保持旧路径可用）
+      userId = this.gateway.userTokenStore?.peekUserInfo?.(identity?.id)?.id ?? null
+      if (userId == null) {
+        try {
+          userId = (await this.gateway.pool.getUserInfo(identity.id))?.id ?? null
+        } catch {
+          userId = null
+        }
       }
     }
 

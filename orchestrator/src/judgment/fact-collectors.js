@@ -179,7 +179,7 @@ export class FactCollector {
   // F5 我的预约：只含当前身份的 ACTIVE 记录——查证必须用发起写入时的同一身份（initiator）
   async #collectMyReservations(identity) {
     if (!identity?.id) return unobtainable(null, '缺少发起时身份', 'no-initiator-identity')
-    const r = await this.gateway.call('edu.reservation.mine', {}, { initiatorIdentity: identity.id, phase: 'P2' })
+    const r = await this.gateway.call('edu.reservation.mine', {}, { phase: 'P2' })
     if (r.verdict !== 'SUCCESS') return unobtainable(r, '我的预约查询未成功')
     return obtained(r.data ?? [], { total: (r.data ?? []).length })
   }
