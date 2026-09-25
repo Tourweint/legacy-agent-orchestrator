@@ -85,7 +85,7 @@ docs/                文档体系（交付物，见 docs/README.md）
 orchestrator/        编排引擎（阶段 0–4 已完成，`npm start` 可运行于 8090；见 orchestrator/README.md）
 mock-legacy/         被测存量系统（第三方开源项目，零侵入，已可运行）
 frontend/            对话前端（阶段 7 已完成：Vue 3 三视图，npm run dev → 5173）
-deploy/              部署脚本与配置（存量系统启动/复位）
+deploy/              部署脚本与配置（存量系统启动/复位；演示检查/场景预置/清理/注入器）
 _prototype/          降级件（非交付物，冻结，不得继续开发）
 ```
 
