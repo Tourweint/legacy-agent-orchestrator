@@ -34,7 +34,7 @@ intents:
       - { step: admin-reservations, interface: logi.reservation.list,           serves: "F4（不带 keyword，拉全量）" }
       - { step: my-reservations,    interface: edu.reservation.mine,            serves: "F5（发起时身份）" }
       - { step: maintenance-list,   interface: logi.maintenance.list,           serves: "F6（ADMIN，跨权限域）" }
-      - { step: submit-reservation, interface: edu.reservation.classroom.create, serves: "提交（唯一写出口，仅 SUBMITTING 态发出）" }
+      - { step: submit-reservation, interface: edu.reservation.classroom.create, serves: "提交（唯一写出口，仅 SUBMITTING 态发出）", role: submit }
     verification:
       # 三条路径与优先级：第 06 章 §五（首选 ADMIN 全量列表；降级 mine 须交叉印证）
       primary:  { interface: logi.reservation.list, identity: ADMIN }
@@ -62,7 +62,7 @@ intents:
     slots:
       required: [classroomName, datePhrase, timeSegment]
       optional: []
-    facts: [F1, F3, F4, F6]
+    facts: [F1, F3, F4, F5, F6]   # F5 支撑 P-SLOT-FREE 的降级交叉印证（F4 不可得时）；F2 不在链路（第 01 章 §6.1 ③）
     propositions:
       - P-CLASSROOM-EXISTS
       - P-CLASSROOM-ENABLED

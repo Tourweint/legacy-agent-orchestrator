@@ -60,11 +60,17 @@ export class EvidenceChain {
       throw new EvidenceError(`动作 "${action}" 缺依据引用（basis 不得为空，I4）`)
     }
     for (const ref of basis) {
-      if (!ref || typeof ref !== 'object' || (!ref.fact && !ref.proposition && !ref.rule)) {
-        throw new EvidenceError(`动作 "${action}" 的依据引用必须指向事实（F#）、命题（P-#）或判定规则行（W#/R#）`)
+      if (!ref || typeof ref !== 'object' || (!ref.fact && !ref.proposition && !ref.rule && ref.evidence === undefined && !ref.spec)) {
+        throw new EvidenceError(`动作 "${action}" 的依据引用必须指向事实（F#）、命题（P-#）、判定规则行（W#/R#）、另一条证据条目（evidence: seq）或设计规格（spec: 文件#节）`)
       }
       if (ref.rule && !/^[WR]\d{1,2}$/.test(ref.rule)) {
         throw new EvidenceError(`动作 "${action}" 的规则行号格式非法: ${ref.rule}（C15：W/R + 稳定编号）`)
+      }
+      if (ref.evidence !== undefined && (!Number.isInteger(ref.evidence) || ref.evidence < 1)) {
+        throw new EvidenceError(`动作 "${action}" 的证据条目引用非法: ${ref.evidence}`)
+      }
+      if (ref.spec && !/^[\w.\-#§]+$/.test(ref.spec)) {
+        throw new EvidenceError(`动作 "${action}" 的规格引用非法: ${ref.spec}`)
       }
     }
     if (!conclusion || !conclusion.outcome) {

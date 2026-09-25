@@ -46,6 +46,7 @@ export class ConfigStore {
     this.plans = readYamlFile(dir, 'intent-plans.yaml')
     this.identities = readYamlFile(dir, 'identity-declarations.yaml')
     this.stateMachine = readYamlFile(dir, 'state-machine.yaml')
+    this.propositions = readYamlFile(dir, 'propositions.yaml')
     this.#validate()
   }
 
@@ -65,6 +66,16 @@ export class ConfigStore {
     const found = this.intentList.find((it) => it.id === id)
     if (!found) throw new ConfigError(`意图未登记: ${id}`)
     return found
+  }
+
+  getProposition(id) {
+    const found = this.propositionList.find((it) => it.id === id)
+    if (!found) throw new ConfigError(`命题未登记: ${id}`)
+    return found
+  }
+
+  get allPropositions() {
+    return this.propositionList
   }
 
   get intentList() {
@@ -101,6 +112,7 @@ export class ConfigStore {
     this.#validatePlans()
     this.#validateIdentities()
     this.#validateStateMachine()
+    this.#validatePropositions()
   }
 
   #validateRegistry() {
@@ -224,5 +236,46 @@ export class ConfigStore {
         throw new ConfigError(`转移表边的 purpose 非法: ${edge.purpose}`)
       }
     }
+  }
+
+  #validatePropositions() {
+    const list = this.propositions.propositions
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new ConfigError('命题清单为空')
+    }
+    const knownFacts = new Set(['F1', 'F2', 'F3', 'F4', 'F5', 'F6'])
+    const seen = new Set()
+    for (const prop of list) {
+      for (const f of ['id', 'semantics', 'dependsOn', 'when']) {
+        if (!(f in prop)) throw new ConfigError(`命题 ${prop.id || '(无 id)'} 缺字段: ${f}`)
+      }
+      if (seen.has(prop.id)) throw new ConfigError(`命题标识重复: ${prop.id}`)
+      seen.add(prop.id)
+      for (const fact of prop.dependsOn) {
+        if (!knownFacts.has(fact)) throw new ConfigError(`命题 ${prop.id} 依赖未知事实: ${fact}`)
+      }
+      if (!(typeof prop.degradable === 'boolean')) {
+        throw new ConfigError(`命题 ${prop.id} 缺 degradable（可降级性，第 08 章 §四）`)
+      }
+      const degradedFacts = prop.degraded?.facts ?? []
+      for (const fact of degradedFacts) {
+        if (!knownFacts.has(fact)) throw new ConfigError(`命题 ${prop.id} 降级事实未知: ${fact}`)
+      }
+    }
+    // 意图计划引用的命题必须已登记（引用完整性）+ 命题依赖 ⊆ 意图事实清单（计划可执行性）
+    for (const intent of this.intentList) {
+      for (const propId of intent.propositions ?? []) {
+        const prop = list.find((p) => p.id === propId)
+        if (!prop) {
+          throw new ConfigError(`意图 ${intent.id} 引用了未登记命题: ${propId}`)
+        }
+        for (const fact of [...prop.dependsOn, ...(prop.degraded?.facts ?? [])]) {
+          if (!(intent.facts ?? []).includes(fact)) {
+            throw new ConfigError(`意图 ${intent.id} 的事实清单缺少 ${fact}（命题 ${propId} 依赖它）`)
+          }
+        }
+      }
+    }
+    this.propositionList = list
   }
 }

@@ -1,0 +1,128 @@
+# =============================================================================
+# 命题清单 —— 第 08 章 §五 的数据落地（主链路 5 条 + 非主链路 2 条，三审计数订正）
+#
+# 为什么命题是数据：事实→命题→状态机三层是数据关系（第 08 章 §六）。
+# 新增一条只依赖已有事实的命题 = 本文件加一节，代码零改动（第 13 章阶段 2 验收①）。
+# 判定算子库（predicates.js）是"技术词表"；本文件用它们组合出业务规则。
+#
+# 字段规格（第 08 章 §四）：
+#   semantics        这条命题在问什么（人读）
+#   dependsOn        依赖的事实（驱动事实收集；事实不可得时的挂载点）
+#   skipWhen         满足时整条跳过（NOT_APPLICABLE）——如教室未解析时，其余命题无意义
+#   when             成立条件（谓词表达式；不成立 → VIOLATED）
+#   degraded         部分事实不可得时的交叉印证口径（§2.1 / §三）
+#   disposition.unconfirmable
+#                    事实不可得时的处置：conservative-reject（默认，保守拒绝）
+#                    / exempt-continue（C17：仅 P-NOT-ALREADY-MINE，I1 显式豁免）
+#   violatedEvent    不成立时驱动的事件（默认 PROPOSITIONS_FAILED；ALREADY_DONE = 幂等命中特例）
+#   degradable       不成立时是否允许换方案继续（第 08 章 §八）
+#   invariants       服务的不变量
+# 纪律：本文件不得出现接口路径/字段名——命题是业务规则，不知道接口长什么样（第 08 章 §九 10）。
+# =============================================================================
+
+propositions:
+
+  # ── 主链路 ────────────────────────────────────────────────────────────────
+  - id: P-CLASSROOM-EXISTS
+    semantics: 教室存在——人读标识能解析到系统 id
+    dependsOn: [F1]
+    when: {op: classroom-known}
+    violatedMessage: >-
+      系统中没有找到房间号为 {{target.roomNumber}} 的教室（{{target.building}}）。现有教室：{{candidates}}
+    degradable: false
+    invariants: [I1]
+
+  - id: P-CLASSROOM-ENABLED
+    semantics: 教室启用——status 属于启用集（空值视为启用，C1 实测后保留为防御口径）
+    dependsOn: [F1]
+    skipWhen: {op: classroom-unknown}      # 教室不存在时本命题无意义（由 EXISTS 拒绝）
+    when: {op: value-in-set, fact: F1, path: status, set: classroomEnabledStates}
+    violatedMessage: '该教室当前状态为「{{matchedValue}}」，不可预约'
+    degradable: true
+    invariants: [I1]
+
+  - id: P-NOT-ALREADY-MINE
+    semantics: 本人未重复提交——存在有效记录（写入者=本人 且 资源=目标 且 时段重叠）即不成立；
+      三个条件必须同时成立（第 06 章 §三）
+    dependsOn: [F4]
+    when: {not: {op: overlap-exists, fact: F4, writer: self}}
+    # 终态特例（决策 C6）：本命题不成立不落拒绝，落幂等命中 DONE（事件 ALREADY_DONE）
+    violatedEvent: ALREADY_DONE
+    violatedMessage: >-
+      已为您办妥：此事此前已办成（预约 #{{matched.recordId}}，{{matched.slotText}}），未重复提交。
+    violatedAppendix:
+      when: {op: slot-exceeds-matched}     # J2：申请区间超出已有时段时追加提示
+      message: 如需完整时段，请先撤销原预约再重新提交。
+    degradable: false
+    degraded:
+      # F4 不可得 → 用 F5 交叉：mine 只含本人 ACTIVE 记录，能确证"我没提交过"（Q1 自知）
+      facts: [F5]
+      violatedWhen: {op: overlap-exists, fact: F5, writer: self}
+      satisfiedBecomes: satisfied
+    disposition:
+      # C17 / I1 显式豁免：两份事实都不可得时继续提交，依赖存量系统冲突检测兜底；
+      # 结果必须标注"未能确认是否重复"（不得类推为一般原则）
+      unconfirmable: exempt-continue
+      unconfirmableMessage: 未能确认您是否已提交过同一时段（预约记录暂不可得），将提交并由存量系统的冲突检测兜底。
+    invariants: [I2]
+
+  - id: P-SLOT-FREE
+    semantics: 时段未被占用——F3（座位层）与 F4（跨身份记录层）都要核对；"全量座位"原因二义，
+      必须带歧义标记继续取 F6 交叉判定（第 08 章 §5.1 证据支点）
+    dependsOn: [F3, F4]
+    skipWhen: {op: classroom-unknown}
+    when:
+      all:
+        - {not: {op: seat-count-nonzero, as: seats}}
+        - {not: {op: overlap-exists, fact: F4, writer: any, as: reservation}}
+    violatedMessages:
+      seats: 该教室在这段时间已有安排
+      reservation: 该教室在这段时间已被预约
+    violatedMessageWhenAmbiguous: 该教室在这段时间不可用（原因需交叉判定）
+    # 安全阈值（C5/§五.4）：超阈仍比对，但"未命中"不得当作"空闲"——降级为无法确认
+    satisfiedDowngradeWhen: {op: list-threshold-exceeded, fact: F4}
+    satisfiedDowngradeMessage: >-
+      预约列表已超过安全阈值（{{threshold}} 条），未能确认该教室这个时段是否空闲，需人工核实。
+    degradable: true
+    degraded:
+      # F4 不可得 → F5+F3 交叉印证（§2.1）：F3 能证明"被占"，证明不了"空闲"（别人的整间
+      # 预约在源码里会以全量座位形式出现，但保守起见不据此判成立）→ 交叉后仍不确定即保守拒绝
+      facts: [F3, F5]
+      violatedWhen: {op: seat-count-nonzero, as: seats}
+      violatedMessages:
+        seats: 该教室在这段时间已有安排
+      satisfiedBecomes: unconfirmable
+      unconfirmableMessage: >-
+        暂时无法确认该教室这个时段是否空闲（跨身份预约记录不可得），为稳妥起见未提交。
+    invariants: [I1]
+
+  - id: P-NOT-UNDER-MAINTENANCE
+    semantics: 不在维修窗口——存在生效中（失效集合排除法，保守优先）且时段重叠的窗口即不成立
+    dependsOn: [F6]
+    skipWhen: {op: classroom-unknown}
+    when: {not: {op: maintenance-overlaps, fact: F6}}
+    violatedMessage: '该教室在这段时间处于检修安排中（{{matched.slotText}}），请改选其他教室'
+    degradable: true
+    invariants: [I1]
+
+  # ── 非主链路（只读演示用；无意图引用，留档以备"粒度差异"之问，第 01 章 §6.1 ③）──
+  - id: P-SEAT-EXISTS
+    semantics: 指定座位存在
+    dependsOn: [F2]
+    when: {op: seat-present}
+    violatedMessage: '没有找到座位 {{target.seatId}}。'
+    degradable: false
+    invariants: [I1]
+
+  - id: P-SEAT-SLOT-FREE
+    semantics: 该座位该时段空闲
+    dependsOn: [F2, F3]
+    when:
+      all:
+        - {op: seat-present, as: seat}
+        - {op: seat-free, as: seatSlot}
+    violatedMessages:
+      seat: '没有找到座位 {{target.seatId}}。'
+      seatSlot: 该座位在这段时间已被占用。
+    degradable: false
+    invariants: [I1]

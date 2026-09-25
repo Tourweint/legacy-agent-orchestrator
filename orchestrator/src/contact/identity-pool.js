@@ -44,9 +44,21 @@ export class IdentityPool {
     if (!forceRefresh && cached && this.#isFresh(cached)) {
       return `Bearer ${cached.token}`
     }
-    const token = await this.#login(identityId)
-    this.#cache.set(identityId, { token, acquiredAt: this.now().getTime() })
+    const { token, userInfo } = await this.#login(identityId)
+    this.#cache.set(identityId, { token, userInfo, acquiredAt: this.now().getTime() })
     return `Bearer ${token}`
+  }
+
+  /**
+   * 登录用户信息（含数字 id 与角色）。数字 id 用于幂等查证的 Q1 写入者匹配
+   * （第 06 章 §三：记录里的写入者 == 本次发起的身份——用 token 背后的用户 id 比对，
+   * token 会过期刷新而身份不会）。
+   */
+  async getUserInfo(identityId) {
+    const cached = this.#cache.get(identityId)
+    if (cached?.userInfo) return cached.userInfo
+    await this.getAuthorization(identityId)
+    return this.#cache.get(identityId)?.userInfo ?? null
   }
 
   /** 读接口 401 后由 contact-gateway 调用：丢弃当前 token，下次取用重新登录。 */
@@ -104,7 +116,7 @@ export class IdentityPool {
       // 登录成功响应里没有 token——响应形状与预期不符，宁可失败也不拿着空凭证往下走
       throw new ContactError(`登录（${identityId}）响应缺少 accessToken 字段`)
     }
-    return token
+    return { token, userInfo: signals.data?.userInfo ?? null }
   }
 
   #timeoutFor(iface) {

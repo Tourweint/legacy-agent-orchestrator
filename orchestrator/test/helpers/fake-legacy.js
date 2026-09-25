@@ -27,9 +27,18 @@ export class FakeTransport {
   }
 }
 
+// 测试用固定用户 id（Q1 写入者匹配依赖 token 背后的数字 id，与存量系统 userInfo.id 同形态）
+export const UIDS = { admin: 10017, 233: 10018, abc: 10019 }
+
 export function loginOk(req) {
-  const token = `tok-${req.body?.username ?? 'x'}`
-  const bodyText = JSON.stringify({ code: 200, message: 'ok', data: { token, userInfo: {} } })
+  const username = req.body?.username ?? 'x'
+  const token = `tok-${username}`
+  const role = username === 'admin' ? 'ADMIN' : username === '233' ? 'TEACHER' : 'STUDENT'
+  const bodyText = JSON.stringify({
+    code: 200,
+    message: 'ok',
+    data: { accessToken: token, refreshToken: `rt-${username}`, userInfo: { id: UIDS[username] ?? 90001, username, role } },
+  })
   return { kind: 'response', httpStatus: 200, json: JSON.parse(bodyText), bodyText }
 }
 
