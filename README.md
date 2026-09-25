@@ -88,7 +88,21 @@ orchestrator/        编排引擎（阶段 0–8 已完成，`npm start` 运行�
 mock-legacy/         被测存量系统（第三方开源项目，零侵入，已可运行）
 frontend/            对话前端（阶段 7 已完成：Vue 3 三视图，npm run dev → 5173）
 deploy/              部署脚本与配置（存量系统启动/复位；演示检查/场景预置/清理/注入器）
+start-all.bat        Windows 一键启动（存量系统 8080 + 引擎 8090 + 前端 5173）
 ```
+
+## 一键启动（Windows）
+
+前置：Node 20+、Maven、**JDK 17**、MariaDB/MySQL（库 `classroom`）、Redis 6379。
+
+```bat
+start-all.bat            :: 启动存量系统 8080 + 编排引擎 8090 + 前端 5173（双击亦可）
+start-all.bat deps       :: 只做前置检查（Node/Maven/JDK17/Redis/MariaDB/端口占用）
+start-all.bat engine     :: 只启动编排引擎
+start-all.bat dry        :: 只打印将要执行的命令，不启动
+```
+
+三个进程各开一个独立窗口，关窗即停。可选配置：`deploy/config/legacy.env`（存量系统，模板见 `legacy.env.example`）与 `deploy/config/orchestrator.env`（引擎凭证）——存在即载入，缺失则用内置的演示默认值。脚本不设置 `ORCH_CHAOS_INJECT`（**混沌默认撤防**）。
 
 ## 运行被测存量系统
 
