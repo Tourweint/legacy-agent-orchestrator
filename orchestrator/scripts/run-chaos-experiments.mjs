@@ -224,7 +224,8 @@ async function expD3A() {
 async function expD3B() {
   // 子场景 B：学生先占用一个座位（真实写入，确定性预置）→ 注入 409（存量教室预订的冲突检测
   // 不含座位级预约——实测发现，见基线文档 §7.4）→ 查证命中"别人写的" → REJECTED
-  // 槽位用 day+1：学生座位预约有 24h 提前窗口（J4 实测），day+3 会被"超出可预约范围"拒绝
+  // 槽位用当天稍后时段：学生座位预约可预约上限为 24h（实测），day+1 13:00 距当前常 >24h 会被拒；
+  // 取当天 15:00–16:00（距当前约 2–3h，在 24h 窗口内且非即刻过期）
   chaos.disarm()
   const studentAuth = await pool.getAuthorization('STUDENT')
   const seatList = await transport.request({
@@ -233,7 +234,7 @@ async function expD3B() {
   })
   const seat = (seatList.json?.data?.seatVOS ?? []).find((s) => s.status === 'ENABLED')
   if (!seat) throw new Error('无可用座位（D3-B 预置失败）')
-  const slot = beijingSlot(1, 13, 14)
+  const slot = beijingSlot(0, 15, 16)
   const booking = await directGateway.call(
     'edu.reservation.seat.create',
     { seatId: seat.id, start: slot.start, end: slot.end, reason: 'D3-B 他人占用预置' },
@@ -296,10 +297,11 @@ async function expD4() {
   return { name: 'D4', runs: [{ terminal: result.terminal, seq: ruleSequence(run.chain), lines }], passes: !lines.some((l) => l.startsWith('✗')) }
 }
 
-// D5 · 补偿失败必须被登记：两步写入 + 撤销两次注入失败 → UNRESOLVED + 待处理事项
+// D5 · 补偿失败必须被登记：第一间创建成功 → 第二间创建失败（注入 400）→ 补偿撤销两次注入失败 → UNRESOLVED + 待处理事项
 async function expD5() {
   chaos.arm({
     injects: [
+      { interface: 'edu.reservation.classroom.create', nth: 2, fault: { type: 'T6', businessCode: 400, httpStatus: 200 } },
       { interface: 'edu.reservation.cancel', nth: 1, fault: { type: 'T6', businessCode: 400, httpStatus: 200 } },
       { interface: 'edu.reservation.cancel', nth: 2, fault: { type: 'T6', businessCode: 400, httpStatus: 200 } },
     ],
@@ -308,7 +310,7 @@ async function expD5() {
   const slot = beijingSlot(4, 13, 14)
   const result = await run.runner.executeTask({
     intentId: 'borrow-classroom',
-    resources: [{ classroom: { classroomId: ROOMS[123].classroomId } }, { classroom: { classroomId: ROOMS[999].classroomId } }],
+    resources: [{ classroom: { classroomId: ROOMS[123].classroomId } }, { classroom: { classroomId: ROOMS[222].classroomId } }],
     slot,
     identity: { id: 'TEACHER' },
   })

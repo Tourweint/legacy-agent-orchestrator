@@ -21,6 +21,9 @@ const constants = store.getConstants()
 const baseUrl =
   process.env[constants.contact.legacyBaseUrlEnv] || constants.contact.legacyBaseUrlDefault
 const port = Number.parseInt(process.env.ORCH_PORT ?? '8090', 10)
+// P1：默认只绑定本机回环地址，避免 8090 暴露到非本机网络；
+// 如需对外提供服务，显式设置 ORCH_BIND_HOST=0.0.0.0 或具体网卡地址。
+const bindHost = process.env.ORCH_BIND_HOST ?? '127.0.0.1'
 
 const chaos = new ChaosController({ configStore: store })
 if (process.env.ORCH_CHAOS_INJECT) {
@@ -39,9 +42,9 @@ const transport = new HttpTransport({
 const adapters = new ProtocolAdapters({ configStore: store })
 const identityPool = new IdentityPool({ configStore: store, transport, adapters, constants })
 
-const { server } = createAccessServer({ configStore: store, transport, identityPool: pool, adapters })
-server.listen(port, () => {
-  console.log(`[orchestrator] 编排引擎已启动 → http://localhost:${port}`)
+const { server } = createAccessServer({ configStore: store, transport, identityPool, adapters })
+server.listen(port, bindHost, () => {
+  console.log(`[orchestrator] 编排引擎已启动 → http://${bindHost}:${port}`)
   console.log(`[orchestrator] 存量系统：${baseUrl}`)
   console.log('[orchestrator] 端点：POST /api/chat · POST /api/tasks · GET /api/tasks/:id · GET /api/tasks/:id/events (SSE) · GET /api/health')
 })

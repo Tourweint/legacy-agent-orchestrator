@@ -34,11 +34,17 @@ export const ERROR_CODES = {
 
 let taskSeq = 0
 
+// CORS 显式来源（P1：不使用 *；开发期前端 5173，可通过环境变量覆盖）
+const ALLOWED_ORIGIN = process.env.ORCH_CORS_ORIGIN || 'http://localhost:5173'
+
+const MAX_BODY_BYTES = 64 * 1024 // 64 KB（P1：请求体上限，防内存耗尽）
+const MAX_FIELD_LENGTH = 4096 // 单字段上限（text/reason/教室名等）
+
 function sendJson(res, httpStatus, code, message, data) {
   const body = JSON.stringify({ code, message, data })
   res.writeHead(httpStatus, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   })
   res.end(body)
 }
@@ -46,27 +52,67 @@ function sendJson(res, httpStatus, code, message, data) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', (c) => chunks.push(c))
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
+    let total = 0
+    let aborted = false
+    req.on('data', (c) => {
+      if (aborted) return
+      total += c.length
+      if (total > MAX_BODY_BYTES) {
+        aborted = true
+        req.destroy()
+        const err = new Error('请求体超过 64 KB 上限')
+        err.code = 'PAYLOAD_TOO_LARGE'
+        reject(err)
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => {
+      if (!aborted) resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', (err) => {
+      if (!aborted) reject(err)
+    })
   })
+}
+
+// 严格 UTC 绝对时刻校验（P1：禁止无时区字符串，避免本地时区歧义）
+function parseUtcInstant(value) {
+  if (typeof value !== 'string' || !value) return null
+  // 必须以 Z 结尾，或包含明确时区偏移（+08:00 / -05:00）
+  if (!/Z$|[+-]\d{2}:\d{2}$/.test(value)) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d
 }
 
 // ---- 形状校验（只管形状：字段存在与类型；可办性归判定层）----
 function validateTaskBody(body) {
   if (typeof body.intentId !== 'string' || !body.intentId) return { code: ERROR_CODES.UNKNOWN_INTENT, message: '缺少 intentId' }
+  if (body.intentId.length > 128) return { code: ERROR_CODES.UNKNOWN_INTENT, message: 'intentId 过长' }
   if (typeof body.identity !== 'string' || !body.identity) return { code: ERROR_CODES.BAD_IDENTITY, message: '缺少 identity（业务身份标识）' }
+  if (body.identity.length > 64) return { code: ERROR_CODES.BAD_IDENTITY, message: 'identity 过长' }
+  if (body.reason != null && (typeof body.reason !== 'string' || body.reason.length > MAX_FIELD_LENGTH)) {
+    return { code: ERROR_CODES.BAD_JSON, message: 'reason 过长（上限 4096 字符）' }
+  }
   if (!Array.isArray(body.resources) || body.resources.length === 0) return { code: ERROR_CODES.BAD_RESOURCES, message: '缺少 resources（至少一个资源目标）' }
+  if (body.resources.length > 10) return { code: ERROR_CODES.BAD_RESOURCES, message: 'resources 过多（上限 10 个）' }
   for (const r of body.resources) {
     const c = r?.classroom
     if (!c || (c.classroomId == null && !(c.building && c.roomNumber))) {
       return { code: ERROR_CODES.BAD_RESOURCES, message: '每个资源需要 classroom.classroomId 或 classroom.building+roomNumber' }
     }
+    if (c.building != null && (typeof c.building !== 'string' || c.building.length > 64)) {
+      return { code: ERROR_CODES.BAD_RESOURCES, message: 'classroom.building 过长' }
+    }
+    if (c.roomNumber != null && (typeof c.roomNumber !== 'string' || c.roomNumber.length > 32)) {
+      return { code: ERROR_CODES.BAD_RESOURCES, message: 'classroom.roomNumber 过长' }
+    }
   }
-  const start = body.slot?.start ? new Date(body.slot.start) : null
-  const end = body.slot?.end ? new Date(body.slot.end) : null
-  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return { code: ERROR_CODES.BAD_SLOT, message: 'slot.start/end 必须是可解析的绝对时刻（ISO 8601）' }
+  const start = parseUtcInstant(body.slot?.start)
+  const end = parseUtcInstant(body.slot?.end)
+  if (!start || !end) {
+    return { code: ERROR_CODES.BAD_SLOT, message: 'slot.start/end 必须是带时区的绝对时刻（如 2026-09-30T05:00:00Z），禁止无时区字符串' }
   }
   if (start.getTime() >= end.getTime()) {
     return { code: ERROR_CODES.BAD_SLOT, message: 'slot.start 必须早于 slot.end' }
@@ -104,12 +150,49 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
     return { chain, runner }
   }
 
+  // P1：后台任务安全执行——任意异常必须收敛为终态，不得悬空（I3）
+  function runTaskSafely({ taskId, chain, promiseFactory, onSuccess }) {
+    return Promise.resolve()
+      .then(() => promiseFactory())
+      .then((outcome) => {
+        onSuccess?.(outcome)
+        return outcome
+      })
+      .catch((err) => {
+        // 写入证据链（action 与终态映射见 event-stream.js：task-force-unresolved → UNRESOLVED）
+        try {
+          chain.record({
+            action: 'task-force-unresolved',
+            basis: [{ spec: 'I3-每次调用必须有唯一结论' }, { detail: `接入层捕获未处理异常: ${err.name}` }],
+            conclusion: {
+              outcome: 'UNRESOLVED',
+              summary: `任务执行异常，已登记为不可恢复（${err.name}: ${err.message}）`,
+            },
+            phase: 'P6',
+            metadata: { errorName: err.name },
+          })
+        } catch (recordErr) {
+          // 证据链写入也失败时，至少保证任务状态收敛
+          console.error(`[orchestrator] 证据链写入失败（任务 ${taskId}）:`, recordErr.message)
+        }
+        const result = {
+          terminal: 'UNRESOLVED',
+          steps: 0,
+          results: [],
+          compensations: [],
+          conclusion: `任务执行异常，已登记为不可恢复（${err.name}: ${err.message}）`,
+        }
+        taskStore.complete(taskId, result)
+        return result
+      })
+  }
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost')
     const route = `${req.method} ${url.pathname}`
     try {
-      // CORS（开发期前端 5173 跨源；登记于对外接口清单）
-      res.setHeader('Access-Control-Allow-Origin', '*')
+      // CORS（P1：显式来源，不使用 *；开发期前端 5173）
+      res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID')
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
       if (req.method === 'OPTIONS') {
@@ -147,18 +230,19 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           taskId,
           chain,
           runner,
-          run: runner
-            .executeTask({
-              intentId: body.intentId,
-              resources: body.resources,
-              slot: { start: new Date(body.slot.start), end: new Date(body.slot.end) },
-              reason: body.reason,
-              identity: { id: body.identity },
-            })
-            .then((result) => {
-              taskStore.complete(taskId, result)
-              return result
-            }),
+          run: runTaskSafely({
+            taskId,
+            chain,
+            promiseFactory: () =>
+              runner.executeTask({
+                intentId: body.intentId,
+                resources: body.resources,
+                slot: { start: parseUtcInstant(body.slot.start), end: parseUtcInstant(body.slot.end) },
+                reason: body.reason,
+                identity: { id: body.identity },
+              }),
+            onSuccess: (result) => taskStore.complete(taskId, result),
+          }),
         })
         // 结果由事件流的终态事件给出（§六：最终结果也由同一条流给出）；另提供 GET 快照兜底
         sendJson(res, 200, ERROR_CODES.OK, 'accepted', { taskId, eventsPath: `/api/tasks/${taskId}/events` })
@@ -191,17 +275,19 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           chain,
           runner,
           stack: null, // 挂起时由下方回填运行栈
-          run: runner
-            .executeChatTask({ text: body.text, identity: { id: body.identity } })
-            .then((outcome) => {
+          run: runTaskSafely({
+            taskId,
+            chain,
+            promiseFactory: () => runner.executeChatTask({ text: body.text, identity: { id: body.identity } }),
+            onSuccess: (outcome) => {
               if (outcome.suspended) {
                 task.stack = outcome.stack
                 taskStore.suspend(taskId, outcome.clarify)
               } else {
                 taskStore.complete(taskId, outcome.result)
               }
-              return outcome
-            }),
+            },
+          }),
         })
         void task
         sendJson(res, 200, ERROR_CODES.OK, 'accepted', { taskId, eventsPath: `/api/tasks/${taskId}/events` })
@@ -313,27 +399,55 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
         })
-        // 先重放已发生的条目，再订阅实时推送；终态事件后关闭流（§6.3 规格 2/3）
-        for (const entry of task.entries()) {
-          const event = mapEntryToEvent(entry)
-          if (event.seq > lastSeq) res.write(sseFrame(event))
+        // P1：快照点分界——先订阅，再取快照，再重放；
+        // 订阅只推送 seq > snapshotSeq 的新事件，重放只写 seq <= snapshotSeq 的历史条目；
+        // 先订阅保证快照之后产生的事件不丢失，快照分界保证不重复。
+        let streamEnded = false
+        let snapshotSeq = 0
+        const writeEvent = (event) => {
+          if (streamEnded || res.writableEnded) return
+          if (event.seq <= lastSeq) return
+          res.write(sseFrame(event))
+          if (event.type === 'terminal') {
+            streamEnded = true
+            res.end()
+          }
         }
-        if (task.status === 'terminal') {
-          res.end()
-          return
-        }
+        // 先订阅（只推送快照之后的新事件）
         const unsubscribe = taskStore.stream.subscribe(taskId, (event) => {
-          if (event.seq > lastSeq) res.write(sseFrame(event))
-          if (event.type === 'terminal') res.end()
+          if (event.seq > snapshotSeq) writeEvent(event)
         })
-        req.on('close', unsubscribe)
-        return
+        req.on('close', () => {
+          streamEnded = true
+          unsubscribe()
+        })
+        // 再取快照（此时起新事件由订阅捕获）
+        const entriesSnapshot = task.entries()
+        snapshotSeq = entriesSnapshot.length > 0 ? entriesSnapshot[entriesSnapshot.length - 1].seq : 0
+        // 再重放快照点及之前的历史条目
+        for (const entry of entriesSnapshot) {
+          if (streamEnded) break
+          const event = mapEntryToEvent(entry)
+          writeEvent(event)
+        }
+        // 终态任务：重放完毕后关闭（终态事件已在重放中写入）
+        if (task.status === 'terminal' && !streamEnded && !res.writableEnded) {
+          streamEnded = true
+          unsubscribe()
+          res.end()
+        }
+        return // SSE 处理完毕，不再继续路由匹配
       }
 
       sendJson(res, 404, ERROR_CODES.ROUTE_NOT_FOUND, '未知路由')
     } catch (err) {
+      // P1：请求体超限返回 413
+      if (err.code === 'PAYLOAD_TOO_LARGE') {
+        sendJson(res, 413, ERROR_CODES.BAD_JSON, err.message)
+        return
+      }
       // 接入层不吞错误也不做业务判断：统一 5000 上报（无凭证）
       sendJson(res, 500, ERROR_CODES.INTERNAL, `内部错误：${err.message}`)
     }
