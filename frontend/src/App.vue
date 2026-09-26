@@ -1,18 +1,19 @@
 <script setup>
-<<<<<<< HEAD
 // 应用外壳 —— 2026-09-26 登录上线后新增一道闸门：未登录不进主界面。
 // 进入时先问一次"我是谁"（会话可能还在），会话失效则退回登录页并给"人话"提示。
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ChatPane from './components/ChatPane.vue'
 import TrajectoryPane from './components/TrajectoryPane.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import LoginView from './views/LoginView.vue'
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal.vue'
+import { useTheme } from './composables/useTheme.js'
 import { useSessionStore } from './stores/session.js'
 import { useTaskStore } from './stores/task.js'
 import { useGlossaryStore } from './stores/glossary.js'
+import { IconSpinner, IconFlag, IconCheck, IconX } from './icons/index.js'
 
 const session = useSessionStore()
-const task = useTaskStore()
 const glossary = useGlossaryStore()
 
 // 术语对照表随登录状态加载/清空（零术语纪律）：登录后拉一次，退出时清掉——
@@ -24,16 +25,6 @@ watch(
     else glossary.reset()
   },
 )
-=======
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useTaskStore } from './stores/task.js'
-import { useTheme } from './composables/useTheme.js'
-import ChatPane from './components/ChatPane.vue'
-import TrajectoryPane from './components/TrajectoryPane.vue'
-import ThemeToggle from './components/ThemeToggle.vue'
-import KeyboardShortcutsModal from './components/KeyboardShortcutsModal.vue'
-import { IconSpinner, IconFlag, IconCheck, IconX } from './icons/index.js'
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 
 const store = useTaskStore()
 const { theme, toggleTheme } = useTheme()
@@ -101,12 +92,11 @@ function handleGlobalKeydown(e) {
   }
 }
 
-<<<<<<< HEAD
 async function logout() {
   // 顺序与容错都是刻意的：先清上一个人的任务视图（换个人不该看见它），
   // 但**任何一步出问题都不能让人退不出去**——退出登录本身必须总能完成。
   try {
-    task._reset()
+    store._reset()
   } catch (err) {
     console.error('[logout] 重置任务视图失败（不影响退出登录）', err)
   }
@@ -115,14 +105,11 @@ async function logout() {
 
 onMounted(() => {
   session.restore()
-=======
-onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 })
 </script>
 
@@ -167,14 +154,12 @@ onUnmounted(() => {
         </Transition>
         <ThemeToggle :theme="theme" @toggle="toggleTheme" />
       </div>
-<<<<<<< HEAD
       <div class="top-right">
         <div v-if="session.isLoggedIn" class="who">
           <span class="role">{{ session.roleLabel }}</span>
           <span class="name">{{ session.displayName }}</span>
           <button class="link" type="button" @click="logout">退出登录</button>
         </div>
-        <ThemeToggle :theme="theme" @toggle="toggleTheme" />
       </div>
     </header>
 
@@ -182,12 +167,7 @@ onUnmounted(() => {
       正在确认登录状态…
     </main>
     <LoginView v-else-if="!session.isLoggedIn" />
-    <main v-else class="views">
-=======
-    </header>
-
-    <main id="main-content" class="views" role="main" tabindex="-1">
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
+    <main v-else id="main-content" class="views" role="main" tabindex="-1">
       <ChatPane />
       <TrajectoryPane />
     </main>

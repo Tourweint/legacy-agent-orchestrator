@@ -44,36 +44,6 @@ export function openTaskStream(taskId, handlers) {
   let reconnectAttempt = 0
   let reconnectTimer = null
 
-<<<<<<< HEAD
-  es.onopen = () => handlers.onState?.('open')
-  es.onerror = () => {
-    if (!closedByTerminal) handlers.onState?.('reconnecting')
-  }
-
-  const handleFrame = (msg) => {
-    try {
-      const event = JSON.parse(msg.data)
-      if (event.type === 'terminal') {
-        closedByTerminal = true
-        handlers.onEvent(event)
-        handlers.onState?.('closed')
-        es.close()
-        return
-      }
-      handlers.onEvent(event)
-    } catch (err) {
-      // 单帧解析失败：按缺陷上报（不静默丢步，§6.3 规格 4）
-      console.error('[sse] 事件帧解析失败', err, msg.data)
-    }
-  }
-
-  // ★ 引擎按类型命名发送（`event: <type>`），而 onmessage 只接收**没有** event 字段的默认帧——
-  //   只用 onmessage 会一条都收不到（表现为：轨迹永远 0 步、终态事件收不到、EventSource 无限重连）。
-  //   类型闭集以 docs/基线文档/对外接口清单.md §四 为准，新增 type 必须先在此登记再补进本表。
-  for (const type of EVENT_TYPES) es.addEventListener(type, handleFrame)
-  // 兜底：万一出现未命名帧，仍按同一处理器收下（不静默丢步）
-  es.onmessage = handleFrame
-=======
   function clearReconnectTimer() {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
@@ -119,27 +89,15 @@ export function openTaskStream(taskId, handlers) {
       scheduleReconnect()
     }
 
-    es.onmessage = (msg) => {
-      try {
-        const event = JSON.parse(msg.data)
-        if (event.type === 'terminal') {
-          closedByTerminal = true
-          clearReconnectTimer()
-          handlers.onEvent(event)
-          handlers.onState?.('closed')
-          es.close()
-          return
-        }
-        handlers.onEvent(event)
-      } catch (err) {
-        // 单帧解析失败：按缺陷上报（不静默丢步，§6.3 规格 4）
-        console.error('[sse] 事件帧解析失败', err, msg.data)
-      }
-    }
+    // 帧格式的双保险：引擎当前发的是**默认帧**（无 `event:` 行，类型在 data 内的 event.type，
+    // 见 orchestrator 的 sseFrame），主路径就是 onmessage；但引擎历史上曾按类型命名发送
+    // （`event: <type>`，那时只有 addEventListener 收得到——表现为轨迹永远 0 步、终态事件收不到）。
+    // 两条路都接上，任何帧格式都不会静默丢步。类型闭集以 docs/基线文档/对外接口清单.md §四 为准。
+    for (const type of EVENT_TYPES) es.addEventListener(type, handleFrame)
+    es.onmessage = handleFrame
   }
 
   connect()
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 
   return {
     close: () => {

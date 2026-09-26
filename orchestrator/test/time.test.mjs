@@ -10,6 +10,7 @@ import {
   rangesOverlap,
   resolveDatePhrase,
   resolveTimeSegment,
+  resolveTimePhrase,
   resolveRelativeRange,
   checkLegacyTimeConstraints,
   toDisplayText,
@@ -127,4 +128,71 @@ test('describeRange 输出人可读的部署地墙钟文字', () => {
     timeOptions,
   )
   assert.equal(text, '2026-09-30 13:00–14:00')
+})
+
+// ---- 精确钟点表达（第 08 章 §7.1 第二类："一点到三点" 此前被漏实现）----------------
+
+const PH = '2026-09-30'
+const span = (phrase) => {
+  const r = resolveTimePhrase(phrase, PH, timeOptions)
+  return `${describeRange(r.start, r.end, timeOptions)}`
+}
+
+test('精确区间：中文钟点、阿拉伯钟点、冒号钟点都能解析（第三条此前只会被追问）', () => {
+  assert.equal(span('下午两点到四点'), '2026-09-30 14:00–16:00')
+  assert.equal(span('上午八点到十点'), '2026-09-30 08:00–10:00')
+  assert.equal(span('14点到16点'), '2026-09-30 14:00–16:00')
+  assert.equal(span('14:00到16:00'), '2026-09-30 14:00–16:00')
+  assert.equal(span('下午2点到4点半'), '2026-09-30 14:00–16:30')
+  assert.equal(span('八点到十点'), '2026-09-30 08:00–10:00')
+})
+
+test('没说上午/下午时按可预约窗口消歧——这条推断写得出规则，故可测', () => {
+  // 凌晨两点不在 07:00–22:30 内，而 14:00 在 → 取 14:00
+  assert.equal(span('两点到四点'), '2026-09-30 14:00–16:00')
+  // 八点已在窗口内 → 不动
+  assert.equal(span('九点到十一点'), '2026-09-30 09:00–11:00')
+  // "六点到八点"：开始点消歧成 18:00 后结束点跟着后移 → 18:00–20:00
+  assert.equal(span('六点到八点'), '2026-09-30 18:00–20:00')
+  // "一点到五点" 同理落在下午 → 13:00–17:00
+  assert.equal(span('一点到五点'), '2026-09-30 13:00–17:00')
+  // 规则外的时间段 → 不猜，抛错追问
+  assert.throws(() => resolveTimePhrase('凌晨三点到五点', PH, timeOptions), TimeError)
+})
+
+test('只说开始没说结束 → 抛 range-incomplete，由调用方追问时长（不猜默认时长）', () => {
+  assert.throws(
+    () => resolveTimePhrase('下午两点', PH, timeOptions),
+    (err) => err instanceof TimeError && err.kind === 'range-incomplete',
+  )
+  assert.throws(
+    () => resolveTimePhrase('14:00', PH, timeOptions),
+    (err) => err.kind === 'range-incomplete',
+  )
+})
+
+test('时间规则外表达 → 抛 unparsed，不得猜测', () => {
+  assert.throws(
+    () => resolveTimePhrase('有空的时候', PH, timeOptions),
+    (err) => err instanceof TimeError && err.kind === 'unparsed',
+  )
+  // 跨自然日（22:00 → 次日 02:00）：仍由硬约束拒绝，不在这里私自跨天
+  assert.throws(() => resolveTimePhrase('22点到2点', PH, timeOptions), TimeError)
+})
+
+test('三段词的口语同义词（早上/傍晚）与既有三段同口径', () => {
+  assert.equal(span('早上'), '2026-09-30 08:00–12:00')
+  assert.equal(span('傍晚'), '2026-09-30 18:00–22:00')
+})
+
+test('显式中文日期："10月1日"这类提示词已承诺的说法不再落到追问', () => {
+  const now = interpretLegacyTimestamp('2026-09-26T04:00:00Z') // 北京 09-26
+  const pending = resolveDatePhrase('10月1日', now, timeOptions)
+  assert.equal(pending.dateYmd, '2026-10-01')
+  assert.equal(pending.needsConfirm, true) // 年份是推断 → 必须"请确认"
+  // 今年的该日期已过 → 取明年（也是推断，同样要确认）
+  assert.equal(resolveDatePhrase('9月1号', now, timeOptions).dateYmd, '2027-09-01')
+  assert.equal(resolveDatePhrase('大后天', now, timeOptions).dateYmd, '2026-09-29')
+  assert.equal(resolveDatePhrase('下星期天', now, timeOptions).dateYmd, '2026-10-04')
+  assert.throws(() => resolveDatePhrase('13月1日', now, timeOptions), TimeError)
 })

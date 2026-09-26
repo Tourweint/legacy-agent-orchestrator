@@ -13,8 +13,13 @@ const CLEANUP_INTERVAL_MS = 5 * 60 * 1000 // 每 5 分钟清理一次
 export class TaskStore {
   constructor({ maxTasks = MAX_TASKS, terminalTtlMs = TERMINAL_TTL_MS, suspendedTtlMs = SUSPENDED_TTL_MS } = {}) {
     this.stream = new EventStream()
-<<<<<<< HEAD
-    this.tasks = new Map() // taskId → { taskId, status, result, owner, entries(), createdAt }
+    this.tasks = new Map() // taskId → { taskId, status, result, owner, entries(), createdAt, completedAt }
+    this.maxTasks = maxTasks
+    this.terminalTtlMs = terminalTtlMs
+    this.suspendedTtlMs = suspendedTtlMs
+    // 启动定期清理（unref 不阻止进程退出）
+    this._cleanupTimer = setInterval(() => this._cleanup(), CLEANUP_INTERVAL_MS)
+    if (this._cleanupTimer.unref) this._cleanupTimer.unref()
   }
 
   /**
@@ -24,22 +29,10 @@ export class TaskStore {
    *        用于"只能取消/查看自己的任务"；任务仍不跨会话（A6 不变）
    */
   register({ taskId, owner = null, chain, run, stack, runner }) {
-=======
-    this.tasks = new Map() // taskId → { taskId, status, result, entries(), createdAt, completedAt, ... }
-    this.maxTasks = maxTasks
-    this.terminalTtlMs = terminalTtlMs
-    this.suspendedTtlMs = suspendedTtlMs
-    // 启动定期清理（unref 不阻止进程退出）
-    this._cleanupTimer = setInterval(() => this._cleanup(), CLEANUP_INTERVAL_MS)
-    if (this._cleanupTimer.unref) this._cleanupTimer.unref()
-  }
-
-  register({ taskId, chain, run, stack, runner }) {
     // 超过上限时先清理最老的终态任务
     if (this.tasks.size >= this.maxTasks) {
       this._evictOldestTerminal()
     }
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
     const task = {
       taskId,
       owner,

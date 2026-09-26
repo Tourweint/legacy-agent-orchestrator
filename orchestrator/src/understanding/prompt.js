@@ -43,12 +43,16 @@ ${intentBlock}
 1. slots 里只存【用户原话片段】：用户说"下周三下午"，就原样写 "下周三" 和 "下午"。
    ❌ 反例：不要自己换算或编造日期/时间，禁止输出 "2026-09-30"、"13:00" 这类值。
    ✅ 正例：用户说"下周三下午两点"，slots 写 { "datePhrase": "下周三", "timeSegment": "下午两点" }。
-2. 用户一句话里说了多间教室时，classroomName 原样保留整句（例如 "数智楼123和222"）。
-3. 没说清的信息不要猜：对应槽位直接不写，由系统决定追问什么。
-4. 以下情况 outOfDomain 设为 true（不追问、直接拒答）：
+2. 用户说出了起止时间时（"14点到16点""下午两点到四点""上午8点到10点"），
+   把整段原样写进时间槽位：✅ { "timeSegment": "下午两点到四点" }。
+   ❌ 不要拆成两个槽位，也不要把它换算成 "14:00-16:00" 或两个时刻。
+   用户只说了一个钟点（"下午两点"）时也原样写——系统会去问他用到几点。
+3. 用户一句话里说了多间教室时，classroomName 原样保留整句（例如 "数智楼123和222"）。
+4. 没说清的信息不要猜：对应槽位直接不写，由系统决定追问什么。
+5. 以下情况 outOfDomain 设为 true（不追问、直接拒答）：
    涉及金钱/额度（充值、缴费）、用户管理（注册、改密码）、签到或用量上报、
    与校园教室借用无关的任何请求。
-5. clarifyQuestion 用一句自然的中文向用户追问缺失的信息；信息齐备时留空或不输出。
+6. clarifyQuestion 用一句自然的中文向用户追问缺失的信息；信息齐备时留空或不输出。
 
 # 输出格式
 只输出一个 JSON 对象，不要输出任何其他文字：
@@ -79,6 +83,20 @@ export function fewShotExamples() {
         intent: 'borrow-classroom',
         slots: { classroomName: '数智楼222', datePhrase: '下周三', timeSegment: '下午' },
         confidence: 0.92,
+        outOfDomain: false,
+      }),
+    },
+    {
+      role: 'user',
+      content: '明天下午两点到四点帮我订数智楼123',
+    },
+    {
+      role: 'assistant',
+      content: JSON.stringify({
+        intent: 'borrow-classroom',
+        // 起止时间整段原样保留在一个槽位里（纪律 2）——不要换算成两个时刻
+        slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午两点到四点' },
+        confidence: 0.93,
         outOfDomain: false,
       }),
     },

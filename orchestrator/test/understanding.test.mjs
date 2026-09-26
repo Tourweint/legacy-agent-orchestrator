@@ -49,6 +49,19 @@ test('验收③：模型输出 ISO 时间被契约校验拒绝；中文原话通
   assert.equal(good.ok, true)
 })
 
+test('判据修正：用户原话里本来就有 "14:00到16:00" → 是原话片段，不该被判成模型自算的值', () => {
+  const raw = JSON.stringify(
+    validOutput({ slots: { classroomName: '数智楼222', datePhrase: '明天', timeSegment: '14:00到16:00' } }),
+  )
+  const withSpeech = validateUnderstandingOutput(raw, ['borrow-classroom'], '帮我订明天14:00到16:00数智楼222')
+  assert.equal(withSpeech.ok, true)
+
+  // 对照：用户只说了"明天下午"，槽位却变成 "14:00到16:00" → 那是模型自己算的，仍拒绝
+  const withoutSpeech = validateUnderstandingOutput(raw, ['borrow-classroom'], '帮我订明天下午数智楼222')
+  assert.equal(withoutSpeech.ok, false)
+  assert.ok(withoutSpeech.violations.some((v) => v.includes('时钟时刻')))
+})
+
 test('验收③（闸门一）：intent 不在闭集 → 违规，不允许"最接近的意图"兜底', () => {
   const result = validateUnderstandingOutput(JSON.stringify(validOutput({ intent: 'borrow-room' })), ['borrow-classroom'])
   assert.equal(result.ok, false)
@@ -225,6 +238,75 @@ test('聊天全流程：一句话 → 全部槽位齐备 → 真实办理 → DO
   const understand = chain.getEntries().find((e) => e.action === 'decide:understand')
   assert.ok(understand, '理解决策入链')
   assert.equal(understand.phase, 'P1')
+})
+
+test('精确区间端到端：说"下午两点到四点"直接按该区间办理（此前会落到"我没听懂"的追问）', async () => {
+  const { runner } = makeChatRunner({}, [
+    validOutput({ slots: { classroomName: '数智楼222', datePhrase: '明天', timeSegment: '下午两点到四点' } }),
+  ])
+  const outcome = await runner.executeChatTask({
+    text: '帮我订明天下午两点到四点数智楼222',
+    identity: sessionIdentity('TEACHER'),
+  })
+  assert.ok(!outcome.suspended, '精确区间不该再被追问')
+  assert.equal(outcome.result.terminal, 'DONE')
+  // §7.3：推算结果照常展示，供用户当场纠正
+  assert.match(outcome.result.conclusion, /14:00–16:00/)
+})
+
+test('只说了一个钟点 → 追问用到几点（不猜默认时长）', async () => {
+  const { runner } = makeChatRunner({}, [
+    validOutput({ slots: { classroomName: '数智楼222', datePhrase: '明天', timeSegment: '下午两点' } }),
+  ])
+  const outcome = await runner.executeChatTask({
+    text: '帮我订明天下午两点的数智楼222',
+    identity: sessionIdentity('TEACHER'),
+  })
+  assert.ok(outcome.suspended)
+  assert.equal(outcome.clarify.kind, 'unparseable-slot')
+  assert.match(outcome.clarify.question, /只说了开始时间/)
+  assert.match(outcome.clarify.question, /14点到16点/) // 追问里给出能听懂的说法
+})
+
+test('追问话术：听不懂时列出系统真正支持的说法，而不是"请换个说法"', async () => {
+  const { runner } = makeChatRunner({}, [
+    validOutput({ slots: { classroomName: '数智楼222', datePhrase: '下周', timeSegment: '有空的时候' } }),
+  ])
+  const outcome = await runner.executeChatTask({
+    text: '下周有空的时候帮我订数智楼222',
+    identity: sessionIdentity('TEACHER'),
+  })
+  assert.ok(outcome.suspended)
+  assert.match(outcome.clarify.question, /我没听懂/)
+  assert.match(outcome.clarify.question, /今天、明天、后天/)
+  assert.match(outcome.clarify.question, /14点到16点/)
+})
+
+test('会话记忆接进理解层：传入的 history 随本轮一起交给模型（跨任务也记得住上一句）', async () => {
+  const { runner, llm } = makeChatRunner({}, [validOutput()])
+  const history = [
+    { role: 'user', content: '帮我借明天下午数智楼123' },
+    {
+      role: 'assistant',
+      content: JSON.stringify({
+        intent: 'borrow-classroom',
+        slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午' },
+        outcome: 'DONE',
+      }),
+    },
+  ]
+
+  await runner.executeChatTask({ text: '那改成后天下午', identity: sessionIdentity('TEACHER'), history })
+
+  const messages = llm.calls[llm.calls.length - 1]
+  assert.ok(
+    messages.some((m) => m.role === 'user' && m.content === '帮我借明天下午数智楼123'),
+    '上一轮原话要在场',
+  )
+  assert.ok(
+    messages.some((m) => m.role === 'assistant' && m.content.includes('数智楼123')),
+    '上一轮的结构化摘要要作为助手侧历史在场',
+  )
 })
 
 test('追问循环：缺时段 → 挂起追问 → 回复补齐 → 恢复办理 → DONE', async () => {

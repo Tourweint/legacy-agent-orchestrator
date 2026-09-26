@@ -21,7 +21,6 @@ export function apiHealth() {
   return request(ENDPOINTS.health)
 }
 
-<<<<<<< HEAD
 // ---- 登录三件套（对外接口清单 §9–§11）----
 
 /** 用校园系统原有账号登录；成功后引擎下发会话 Cookie，响应体不含任何令牌。 */
@@ -49,14 +48,14 @@ export function apiGlossary() {
 
 // ---- 业务端点（均要求已登录）----
 
-/** 自然语言入口（理解层 → 同一编排）。身份由会话派生，不再传 identity。 */
-export function apiChat(text) {
-  return request('/api/chat', { method: 'POST', body: JSON.stringify({ text }) })
-=======
-/** 自然语言入口（理解层 → 同一编排）。 */
-export function apiChat(text, identity) {
-  return request(ENDPOINTS.chat, { method: 'POST', body: JSON.stringify({ text, identity }) })
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
+/**
+ * 自然语言入口（理解层 → 同一编排）。身份由会话派生，不再传 identity。
+ * conversationId：带上它就是"接着这段对话说"——引擎据此把前几轮的结构化摘要交给
+ * 理解层；不带（或引擎不认这个 id）时引擎会发一个新的回来。
+ */
+export function apiChat(text, conversationId = null) {
+  const body = conversationId ? { text, conversationId } : { text }
+  return request('/api/chat', { method: 'POST', body: JSON.stringify(body) })
 }
 
 /** 结构化任务入口（无 LLM 路径；调试入口 G5）。 */

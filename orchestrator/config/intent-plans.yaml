@@ -30,7 +30,7 @@ intents:
       slotHints:
         classroomName: 教室名（用户原话，可一次说多间，如"数智楼123和222"）
         datePhrase: 日期说法（用户原话，如"周三""明天""10月1日"——不要换算成日期）
-        timeSegment: 时段说法（用户原话，如"下午""晚上""上午八点到十点"）
+        timeSegment: 时间说法（用户原话，照抄不要换算：可以是"下午""晚上"这样的时段，也可以是"14点到16点""下午两点到四点"这样的起止钟点）
     facts: [F1, F3, F4, F5, F6]   # F2 不在主链路（第 01 章 §6.1 ③）
     propositions:
       - P-CLASSROOM-EXISTS
@@ -77,7 +77,7 @@ intents:
       slotHints:
         classroomName: 教室名（用户原话，如"数智楼222"）
         datePhrase: 日期说法（用户原话——不要换算成日期）
-        timeSegment: 时段说法（用户原话，如"下午"）
+        timeSegment: 时间说法（用户原话，照抄不要换算：如"下午"，或"14点到16点"这样的起止钟点）
     facts: [F1, F3, F4, F5, F6]   # F5 支撑 P-SLOT-FREE 的降级交叉印证（F4 不可得时）；F2 不在链路（第 01 章 §6.1 ③）
     propositions:
       - P-CLASSROOM-EXISTS
@@ -109,7 +109,7 @@ intents:
       slotHints:
         classroomName: 教室名（可选，如"数智楼123"——只看这一间）
         datePhrase: 日期说法（可选，如"周三"——不要换算成日期）
-        timeSegment: 时段说法（可选，如"下午"）
+        timeSegment: 时间说法（可选，照抄用户原话：如"下午"，或"14点到16点"）
     facts: [F5]
     propositions: []              # 没有"能不能办"的判定——它只是把事实说给用户听
     readOnlyAnswer:
@@ -135,7 +135,7 @@ intents:
       slotHints:
         classroomName: 教室名（可选，如"数智楼123"——用来在您的预约里定位是哪一条）
         datePhrase: 日期说法（可选，如"周三"）
-        timeSegment: 时段说法（可选，如"下午"）
+        timeSegment: 时间说法（可选，照抄用户原话：如"下午"，或"14点到16点"）
     facts: [F5]
     propositions: [P-IS-MINE]
     steps:
@@ -169,7 +169,7 @@ intents:
       optional: [classroomName, originalDatePhrase, originalTimeSegment]
       slotHints:
         datePhrase: 改到的日期（用户原话，如"周四"）
-        timeSegment: 改到的时段（用户原话，如"下午"）
+        timeSegment: 改到的时间（用户原话，照抄不要换算：如"下午"，或"14点到16点"）
         classroomName: 教室名（可选，如"数智楼123"——用来判断改哪一条）
         originalDatePhrase: 原来那天的说法（可选，如"周三"——用来判断改哪一条）
         originalTimeSegment: 原来时段说法（可选）
@@ -223,7 +223,7 @@ intents:
         classroomName: 教室名（如"数智楼123"）
         seatNumber: 座位号（如"1-1"——按座位布局里的编号，形如"行-列"）
         datePhrase: 日期说法（如"明天"——不要换算成日期）
-        timeSegment: 时段说法（如"下午"）
+        timeSegment: 时间说法（如"下午"，或"14点到16点"——照抄）
         reason: 事由（可选）
     facts: [F1, F2, F3, F5]
     propositions:

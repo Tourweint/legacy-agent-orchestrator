@@ -6,6 +6,12 @@
 //     被契约校验拒绝。理由：那是模型"自己算出来的值"，算错时不报错，是本项目明令禁止的
 //     不报错错误源）
 //   · 字段缺失/类型错 → 违规清单（供格式重试回灌给模型，§5.4）
+//
+// ★ 判据修正（2026-09-26）：**形态本身不是罪证，"是不是用户说的"才是。**
+//   用户完全可能原话说"明天14:00到16:00"——此时槽位里出现"14:00"是**原话片段**，
+//   不是模型换算的值。旧判据只看形态，会把这种合法输入判违规→格式重试→最终"听不懂"，
+//   正是"用户明明说了时间却被拒"的成因之一（见 docs/变更记录/2026-09-26-时间表达解析扩展.md）。
+//   现判据：形态命中 **且该片段不出现在用户原话里** 才算模型自算的值。
 
 import { UnderstandingError } from './understanding-error.js'
 
@@ -16,7 +22,7 @@ const COMPUTED_TIME_PATTERNS = [
   [/\b\d{1,2}:\d{2}\b/, '时钟时刻'],
 ]
 
-function violationsFor(value, path, violations, intentIds) {
+function violationsFor(value, path, violations, intentIds, userText) {
   if (path === 'intent') {
     if (typeof value !== 'string' || !value) {
       violations.push('intent 缺失或不是字符串')
@@ -48,6 +54,10 @@ function violationsFor(value, path, violations, intentIds) {
         violations.push(`slots.${key} 必须是原话片段字符串`)
         continue
       }
+      // 判据修正：形态命中但确实是用户原话的一部分 → 放行（见文件头注释）
+      const fromUserSpeech =
+        typeof userText === 'string' && userText !== '' && userText.includes(slotValue.trim())
+      if (fromUserSpeech) continue
       for (const [pattern, label] of COMPUTED_TIME_PATTERNS) {
         if (pattern.test(slotValue)) {
           violations.push(`slots.${key} 出现了${label}形态（"${slotValue}"）——槽位必须存用户原话片段，禁止输出换算后的时间`)
@@ -63,9 +73,10 @@ function violationsFor(value, path, violations, intentIds) {
  * 校验理解层输出。
  * @param {string} rawText            LLM 原始文本（容忍 ```json 围栏）
  * @param {string[]} intentIds        意图闭集
+ * @param {string} [userText]         用户原话——用于判定时间形态是"原话片段"还是"模型自算"
  * @returns {{ok: true, value: object} | {ok: false, violations: string[], parsed: object|null}}
  */
-export function validateUnderstandingOutput(rawText, intentIds) {
+export function validateUnderstandingOutput(rawText, intentIds, userText = '') {
   if (typeof rawText !== 'string' || !rawText.trim()) {
     return { ok: false, violations: ['输出为空'], parsed: null }
   }
@@ -85,14 +96,14 @@ export function validateUnderstandingOutput(rawText, intentIds) {
       violations.push(`缺少字段 ${field}`)
       continue
     }
-    violationsFor(parsed[field], field, violations, intentIds)
+    violationsFor(parsed[field], field, violations, intentIds, userText)
   }
   // 超域输出没有意图（示例即 intent: null）——仅非超域时校验闭集归属
   if (parsed.outOfDomain !== true) {
     if (!('intent' in parsed)) {
       violations.push('缺少字段 intent')
     } else {
-      violationsFor(parsed.intent, 'intent', violations, intentIds)
+      violationsFor(parsed.intent, 'intent', violations, intentIds, userText)
     }
   }
   if (violations.length > 0) return { ok: false, violations, parsed }

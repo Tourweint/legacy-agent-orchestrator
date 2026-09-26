@@ -36,9 +36,9 @@ propositions:
 slots:
   classroomName: 教室
   datePhrase: 日期
-  timeSegment: 时段
+  timeSegment: 时间
   originalDatePhrase: 原来的日期
-  originalTimeSegment: 原来的时段
+  originalTimeSegment: 原来的时间
   reason: 事由
   seatNumber: 座位号
   seatId: 座位

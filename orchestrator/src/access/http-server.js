@@ -22,6 +22,7 @@ import { ProtocolAdapters } from '../contact/adapters.js'
 import { JudgmentEngine } from '../judgment/judgment-engine.js'
 import { TaskRunner } from '../orchestration/task-runner.js'
 import { TaskStore } from './task-store.js'
+import { ConversationStore } from './conversation-store.js'
 import { mapEntryToEvent, sseFrame } from './event-stream.js'
 import { resolveSession, handleAuthRoute, AUTH_ERROR_CODES } from './auth-endpoints.js'
 
@@ -99,7 +100,11 @@ function parseUtcInstant(value) {
 // 注意：identity 不再校验——登录后身份由会话派生（三审拍板：传了忽略、不传不报 4004）
 function validateTaskBody(body, configStore) {
   if (typeof body.intentId !== 'string' || !body.intentId) return { code: ERROR_CODES.UNKNOWN_INTENT, message: '缺少 intentId' }
-<<<<<<< HEAD
+  if (body.intentId.length > 128) return { code: ERROR_CODES.UNKNOWN_INTENT, message: 'intentId 过长' }
+  // reason 是通用字段：任何意图都要限长（P1 字段上限）
+  if (body.reason != null && (typeof body.reason !== 'string' || body.reason.length > MAX_FIELD_LENGTH)) {
+    return { code: ERROR_CODES.BAD_JSON, message: 'reason 过长（上限 4096 字符）' }
+  }
   // 目标不是教室的意图（C7 的"我的预约 / 撤销我的预约"）：不要求 resources 与 slot——
   // 它们的目标是"我自己的记录"，由引擎从"我的预约"里定位（意图计划声明 requiresEntityResolution: false）。
   // 未登记的意图照旧走下面的严格校验（不因为读不到计划就放宽）。
@@ -110,14 +115,6 @@ function validateTaskBody(body, configStore) {
     targetless = false
   }
   if (targetless) return null
-=======
-  if (body.intentId.length > 128) return { code: ERROR_CODES.UNKNOWN_INTENT, message: 'intentId 过长' }
-  if (typeof body.identity !== 'string' || !body.identity) return { code: ERROR_CODES.BAD_IDENTITY, message: '缺少 identity（业务身份标识）' }
-  if (body.identity.length > 64) return { code: ERROR_CODES.BAD_IDENTITY, message: 'identity 过长' }
-  if (body.reason != null && (typeof body.reason !== 'string' || body.reason.length > MAX_FIELD_LENGTH)) {
-    return { code: ERROR_CODES.BAD_JSON, message: 'reason 过长（上限 4096 字符）' }
-  }
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
   if (!Array.isArray(body.resources) || body.resources.length === 0) return { code: ERROR_CODES.BAD_RESOURCES, message: '缺少 resources（至少一个资源目标）' }
   if (body.resources.length > 10) return { code: ERROR_CODES.BAD_RESOURCES, message: 'resources 过多（上限 10 个）' }
   for (const r of body.resources) {
@@ -160,6 +157,11 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
   // 共享装配（构造期一次）：适配器与身份池跨任务复用；证据链按任务独立
   const sharedGateway = new ContactGateway({ configStore, transport, identityPool, userTokenStore, adapters: adapterImpl })
   const taskStore = new TaskStore()
+  // 会话记忆（跨轮）：一轮 chat 任务只承载一轮对话，任务落终态后运行栈即销毁——
+  // 会话记忆负责把"上一句说了哪间教室/哪个时段"带进下一轮（见 conversation-store.js）
+  const conversationStore = new ConversationStore()
+  const conversationCleanupTimer = setInterval(() => conversationStore.cleanup(), 5 * 60 * 1000)
+  if (conversationCleanupTimer.unref) conversationCleanupTimer.unref()
 
   // 每任务运行栈：证据链/网关/判定/理解（留档绑定本任务链）/编排
   // 网关视图绑定**本任务的发起人**（登录会话派生）——写操作只认这个人的身份（决定 3）
@@ -180,11 +182,11 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
     return { chain, runner }
   }
 
-<<<<<<< HEAD
   // 登录后身份的规范化形态：写操作走本人令牌（网关按接口声明的 initiator 解析）
   function identityOf(session) {
     return { id: session.username, userId: session.userInfo?.id ?? null, role: session.role }
-=======
+  }
+
   // P1：后台任务安全执行——任意异常必须收敛为终态，不得悬空（I3）
   function runTaskSafely({ taskId, chain, promiseFactory, onSuccess }) {
     return Promise.resolve()
@@ -220,24 +222,16 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         taskStore.complete(taskId, result)
         return result
       })
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
   }
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost')
     const route = `${req.method} ${url.pathname}`
     try {
-<<<<<<< HEAD
-      // CORS（开发期前端 5173 跨源；登记于对外接口清单）
-      res.setHeader('Access-Control-Allow-Origin', '*')
+      // CORS（P1：显式来源，不使用 *；开发期前端 5173，可经 ORCH_CORS_ORIGIN 覆盖）
+      res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID, Authorization')
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
-=======
-      // CORS（P1：显式来源，不使用 *；开发期前端 5173）
-      res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID')
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
       if (req.method === 'OPTIONS') {
         res.writeHead(204)
         res.end()
@@ -318,35 +312,24 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           owner: session.username,
           chain,
           runner,
-<<<<<<< HEAD
-          run: runner
-            .executeTask({
-              intentId: body.intentId,
-              // 目标不是教室的意图可以不传 resources / slot（引擎自己从"我的预约"里定位）
-              resources: body.resources,
-              slot: body.slot ? { start: new Date(body.slot.start), end: new Date(body.slot.end) } : null,
-              reason: body.reason,
-              identity: identityOf(session),
-            })
-            .then((result) => {
-              taskStore.complete(taskId, result)
-              return result
-            }),
-=======
+          // 后台执行统一走 runTaskSafely（P1：任意异常收敛为终态，不悬空）
           run: runTaskSafely({
             taskId,
             chain,
             promiseFactory: () =>
               runner.executeTask({
                 intentId: body.intentId,
+                // 目标不是教室的意图可以不传 resources / slot（引擎自己从"我的预约"里定位）
                 resources: body.resources,
-                slot: { start: parseUtcInstant(body.slot.start), end: parseUtcInstant(body.slot.end) },
+                // 严格 UTC 绝对时刻（P1：禁止无时区字符串）
+                slot: body.slot
+                  ? { start: parseUtcInstant(body.slot.start), end: parseUtcInstant(body.slot.end) }
+                  : null,
                 reason: body.reason,
-                identity: { id: body.identity },
+                identity: identityOf(session),
               }),
             onSuccess: (result) => taskStore.complete(taskId, result),
           }),
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
         })
         // 结果由事件流的终态事件给出（§六：最终结果也由同一条流给出）；另提供 GET 快照兜底
         sendJson(res, 200, ERROR_CODES.OK, 'accepted', { taskId, eventsPath: `/api/tasks/${taskId}/events` })
@@ -370,6 +353,13 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         }
         taskSeq += 1
         const taskId = `T-${Date.now()}-${taskSeq}`
+        // 会话：前端带 conversationId 就续上（记忆连续）；没带或不属于自己就新开一个并回传
+        const conversationId = conversationStore.resolveId(
+          body.conversationId,
+          session.username,
+          () => `C-${Date.now()}-${taskSeq}`,
+        )
+        const history = conversationStore.historyFor(conversationId, session.username)
         const { chain, runner } = newTaskStack(taskId, session)
         const task = taskStore.register({
           taskId,
@@ -377,17 +367,21 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           chain,
           runner,
           stack: null, // 挂起时由下方回填运行栈
-<<<<<<< HEAD
-          run: runner
-            .executeChatTask({ text: body.text, identity: identityOf(session) })
-            .then((outcome) => {
-=======
+          // 后台执行统一走 runTaskSafely（P1：任意异常收敛为终态，不悬空）
           run: runTaskSafely({
             taskId,
             chain,
-            promiseFactory: () => runner.executeChatTask({ text: body.text, identity: { id: body.identity } }),
+            promiseFactory: () =>
+              runner.executeChatTask({ text: body.text, identity: identityOf(session), history }),
             onSuccess: (outcome) => {
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
+              // 会话记忆留档：这一轮说了什么、解析成什么、结果如何——它就是下一轮的上下文。
+              // 挂起（追问）也要记：用户下一句的"那……"依赖这一轮已说过的信息。
+              conversationStore.recordTurn(conversationId, session.username, {
+                text: body.text,
+                intent: outcome.understanding?.intent ?? null,
+                slots: outcome.understanding?.slots ?? {},
+                outcome: outcome.suspended ? 'INPUT_REQUIRED' : (outcome.result?.terminal ?? null),
+              })
               if (outcome.suspended) {
                 task.stack = outcome.stack
                 taskStore.suspend(taskId, outcome.clarify)
@@ -398,7 +392,11 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           }),
         })
         void task
-        sendJson(res, 200, ERROR_CODES.OK, 'accepted', { taskId, eventsPath: `/api/tasks/${taskId}/events` })
+        sendJson(res, 200, ERROR_CODES.OK, 'accepted', {
+          taskId,
+          conversationId,
+          eventsPath: `/api/tasks/${taskId}/events`,
+        })
         return
       }
 

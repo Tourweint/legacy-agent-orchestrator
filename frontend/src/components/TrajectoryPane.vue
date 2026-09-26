@@ -14,14 +14,10 @@ const { copied, copy } = useCopy()
 const collapsed = ref({ P1: false, P2: false, P3: false, P4: false, P5: true, P6: true })
 
 const hasTask = computed(() => store.taskId !== null)
-<<<<<<< HEAD
 // 终态才显示结果卡（此前模板里写的是未定义的 `terminal`，导致结果卡永远不渲染）
 const isTerminal = computed(() => store.taskStatus === 'terminal')
-=======
-const terminal = computed(() => store.taskStatus === 'terminal')
 const isLoading = computed(() => store.taskStatus === 'running' && store.events.length === 0)
 const isRunning = computed(() => store.taskStatus === 'running')
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 
 function toggle(key) {
   collapsed.value[key] = !collapsed.value[key]
@@ -50,11 +46,7 @@ function copyTaskId() {
       </div>
     </div>
 
-<<<<<<< HEAD
-    <div v-if="isTerminal">
-=======
-    <div v-if="terminal" class="animate-result-in">
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
+    <div v-if="isTerminal" class="animate-result-in">
       <ResultCard />
     </div>
 

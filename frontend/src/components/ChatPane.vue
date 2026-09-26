@@ -37,19 +37,16 @@ function useExample(text) {
   send()
 }
 
-// 对话视图的助手侧消息全部由事件派生（§6.1：不自行推断）
-const assistantMessages = computed(() =>
-  store.events
+// 对话视图的助手侧消息全部由事件派生（§6.1：不自行推断）——按轮取，历史轮照常显示
+function assistantMessagesOf(turn) {
+  return turn.events
     .filter((e) => e.type === 'input-required' || e.type === 'terminal')
     .map((e) => ({ seq: e.seq, kind: e.type, text: e.text }))
-)
+}
 
 const pending = computed(() => store.taskStatus === 'running')
 const suspended = computed(() => store.taskStatus === 'suspended')
 const terminal = computed(() => store.taskStatus === 'terminal')
-const isEmpty = computed(
-  () => store.userMessages.length === 0 && assistantMessages.value.length === 0
-)
 
 // 取消按钮显隐矩阵（§4.5/B8）：提交前可见；不确定态禁用重试类操作
 const showCancel = computed(() => store.canCancel || (pending.value && !store.writeIssued))
@@ -61,6 +58,7 @@ async function send() {
   if (suspended.value) {
     await store.reply(text)
   } else {
+    // 终态后继续说是合法的：同一段对话里接着办下一件（引擎带着上文理解）
     await store.startChat(text)
   }
   scrollBottom()
@@ -74,8 +72,9 @@ function cancelTask() {
   store.cancel()
 }
 
-function newTask() {
-  store._reset()
+/** 另起一段对话：轮次与记忆都从头开始。 */
+function newConversation() {
+  store.newConversation()
   draft.value = ''
 }
 
@@ -116,91 +115,89 @@ function scrollBottom() {
   nextTick(() => listEl.value?.scrollTo({ top: listEl.value.scrollHeight, behavior: 'smooth' }))
 }
 
-watch(assistantMessages, scrollBottom)
+// 任一轮出现新事件（或说出新的一句）就滚到底
+watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`).join('|'), scrollBottom)
 </script>
 
 <template>
   <section class="chat card" aria-label="对话区域">
-    <div class="pane-title">对话</div>
+    <div class="pane-head">
+      <div class="pane-title">对话</div>
+      <button v-if="store.hasAnyTurn" class="btn btn-ghost btn-sm" @click="newConversation">
+        新对话
+      </button>
+    </div>
 
     <div ref="listEl" class="messages" role="log" aria-live="polite" aria-label="对话消息">
       <EmptyState
-        v-if="isEmpty"
+        v-if="!store.hasAnyTurn"
         title="开始一次代办"
-        description="试试：「帮我借下周三下午数智楼222」或「查一下明天上午数智楼123有没有空」"
+        description="试试：「帮我借下周三下午数智楼222」。办完之后接着在这段对话里说下一句就行——它记得住上文。"
       />
 
-      <div
-        v-for="(m, i) in store.userMessages"
-        :key="'u' + i"
-        class="bubble user animate-message-right"
-        :style="{ animationDelay: `${i * 40}ms` }"
-      >
-        {{ m.text }}
-      </div>
+      <!-- 会话 = 多轮；每轮 = 这一轮用户说过的话 + 该轮事件派生的助手消息 -->
+      <template v-for="(turn, ti) in store.turns" :key="turn.id">
+        <div
+          v-for="(text, ui) in turn.userMessages"
+          :key="'u' + ti + '-' + ui"
+          class="bubble user animate-message-right"
+        >
+          {{ text }}
+        </div>
 
-      <template v-for="m in assistantMessages" :key="'a' + m.seq">
-        <div
-          class="bubble assistant animate-message-left"
-          :class="{ pending: m.kind === 'input-required' && pending }"
-        >
-          {{ m.text }}
-          <span
-            v-if="m.kind === 'input-required' && pending"
-            class="pulse-dot"
-            aria-hidden="true"
-          ></span>
-        </div>
-        <!-- 闸门二：候选意图按钮（E5） -->
-        <div
-          v-if="m.kind === 'input-required' && store.clarify?.kind === 'intent-choice' && suspended"
-          class="choices"
-        >
-          <button
-            v-for="c in store.clarify.candidates"
-            :key="c.id"
-            class="btn btn-sm"
-            @click="chooseCandidate(c)"
+        <template v-for="m in assistantMessagesOf(turn)" :key="'a' + m.seq">
+          <div
+            class="bubble assistant animate-message-left"
+            :class="{
+              pending: m.kind === 'input-required' && turn.id === store.activeTurnId && pending,
+            }"
           >
-            {{ c.name }}
-          </button>
-        </div>
+            {{ m.text }}
+            <span
+              v-if="m.kind === 'input-required' && turn.id === store.activeTurnId && pending"
+              class="pulse-dot"
+              aria-hidden="true"
+            ></span>
+          </div>
+          <!-- 闸门二：候选意图按钮（E5） -->
+          <div
+            v-if="
+              m.kind === 'input-required' &&
+              turn.id === store.activeTurnId &&
+              turn.clarify?.kind === 'intent-choice' &&
+              turn.status === 'suspended'
+            "
+            class="choices"
+          >
+            <button
+              v-for="c in turn.clarify.candidates"
+              :key="c.id"
+              class="btn btn-sm"
+              @click="chooseCandidate(c)"
+            >
+              {{ c.name }}
+            </button>
+          </div>
+        </template>
       </template>
     </div>
 
     <!-- 取消按钮（B8/§4.5：写请求发出前可见；提交后不提供任何等价重试/放弃入口） -->
     <div v-if="showCancel && !terminal" class="cancel-row">
-<<<<<<< HEAD
-      <button class="cancel" @click="cancelTask">取消任务（未产生任何变更）</button>
+      <button class="btn btn-danger btn-block" @click="cancelTask">
+        <IconX :size="14" />
+        取消任务（未产生任何变更）
+      </button>
     </div>
 
-    <div v-if="store.error" class="error">{{ store.error }}</div>
-
-    <!-- 能力入口：说一句就能办（当前角色办得到的那些） -->
-    <div v-if="!terminal && !suspended" class="capability">
+    <!-- 能力入口：说一句就能办（当前角色办得到的那些）；空闲或已办完都可用 -->
+    <div v-if="!pending && !suspended" class="capability">
       <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
       <div class="chips">
         <button v-for="text in examples" :key="text" class="chip" :disabled="pending" @click="useExample(text)">
           {{ text }}
         </button>
       </div>
-    </div>
-
-    <div class="composer">
-      <input
-        v-model="draft"
-        :placeholder="suspended ? '补充信息……' : '用一句话说明要办的事'"
-        :disabled="terminal"
-        @keydown.enter="send"
-      />
-      <button class="primary" :disabled="!draft.trim() || pending || terminal" @click="send">
-        {{ suspended ? '回复' : '发送' }}
-=======
-      <button class="btn btn-danger btn-block" @click="cancelTask">
-        <IconX :size="14" />
-        取消任务（未产生任何变更）
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
-      </button>
     </div>
 
     <ErrorState v-if="store.error" title="请求失败" :message="store.error" :show-retry="false" />
@@ -212,7 +209,6 @@ watch(assistantMessages, scrollBottom)
       :pending="pending"
       :terminal="terminal"
       @send="send"
-      @new-task="newTask"
       @keydown="handleKeydown"
     />
 
@@ -232,9 +228,15 @@ watch(assistantMessages, scrollBottom)
   top: var(--space-5);
 }
 
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
 .pane-title {
   font-weight: var(--weight-semibold);
-  margin-bottom: var(--space-3);
 }
 
 .messages {
@@ -302,7 +304,6 @@ watch(assistantMessages, scrollBottom)
   margin: var(--space-2) 0;
 }
 
-<<<<<<< HEAD
 .cancel {
   width: 100%;
   color: var(--status-danger);
@@ -361,8 +362,6 @@ watch(assistantMessages, scrollBottom)
   flex: 1;
 }
 
-=======
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 .debug {
   margin-top: var(--space-3);
   font-size: var(--text-xs);

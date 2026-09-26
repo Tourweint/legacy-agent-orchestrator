@@ -12,6 +12,11 @@ import { parseClassroomName } from '../canonical/classroom-name.js'
 import { resolveRelativeRange, checkLegacyTimeConstraints } from '../canonical/time.js'
 import { authorizeIntent, roleLabel } from './intent-authorizer.js'
 
+// 归一化失败时的追问附录：**列出系统真正支持的说法**。
+// 只写"请换个说法"等于把猜测成本推给用户（体验问题，2026-09-26 反馈）。
+const TIME_PHRASE_HINT =
+  '日期可以说：今天、明天、后天、周三、下周三、10月1日；时间可以说：上午、下午、晚上，或者"14点到16点""下午两点到四点"。'
+
 export class ChatBridge {
   constructor({ configStore, understandingEngine, evidenceChain = null }) {
     this.store = configStore
@@ -140,10 +145,13 @@ export class ChatBridge {
           new Date(),
           this.store.getConstants().time,
         )
-      } catch {
+      } catch (err) {
         this.#clarify(machine, taskContext, {
           kind: 'unparseable-slot',
-          question: `「${taskContext.slots.datePhrase ?? ''} ${taskContext.slots.timeSegment ?? ''}」我没看懂要改到什么时候——请换个说法（例如：周四下午）。`,
+          question:
+            err.kind === 'range-incomplete'
+              ? `「${taskContext.slots.timeSegment}」只说了开始时间——您要改到几点到几点？（例如：14点到16点）`
+              : `「${this.#phraseText(taskContext.slots.datePhrase, taskContext.slots.timeSegment)}」我没看懂要改到什么时候。${TIME_PHRASE_HINT}`,
         })
         return
       }
@@ -212,6 +220,11 @@ export class ChatBridge {
     machine.fire('SLOTS_INCOMPLETE', { payload: { kind: clarify.kind } })
   }
 
+  /** 把用户原话里的日期/时间片段拼成一句可读的引用（避免出现 "undefined undefined"）。 */
+  #phraseText(...parts) {
+    return parts.filter((p) => typeof p === 'string' && p.trim()).join(' ') || '您说的时间'
+  }
+
   #normalizeSlots(slots) {
     const rooms = parseClassroomName(slots.classroomName)
     if (rooms.length === 0) {
@@ -226,9 +239,13 @@ export class ChatBridge {
         new Date(),
         this.store.getConstants().time,
       )
-    } catch {
+    } catch (cause) {
       const err = new Error('datePhrase/timeSegment 规则外表达')
-      err.userMessage = `「${slots.datePhrase} ${slots.timeSegment}」我没看懂——请换个说法（例如：周三下午、明天上午八点到十点）。`
+      err.kind = cause.kind
+      err.userMessage =
+        cause.kind === 'range-incomplete'
+          ? `「${slots.timeSegment}」只说了开始时间——您要从几点用到几点？（例如：14点到16点）`
+          : `「${this.#phraseText(slots.datePhrase, slots.timeSegment)}」我没听懂。${TIME_PHRASE_HINT}`
       throw err
     }
     const check = checkLegacyTimeConstraints(range, new Date(), this.store.getConstants().time)
@@ -249,7 +266,7 @@ export class ChatBridge {
     const hints = {
       classroomName: '哪间教室？',
       datePhrase: '哪一天？',
-      timeSegment: '什么时段？',
+      timeSegment: '什么时间（"下午"或"14点到16点"都行）？',
     }
     return `要办这件事，我还需要知道：${missing.map((m) => hints[m] ?? m).join('，')}。`
   }

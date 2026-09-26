@@ -105,32 +105,51 @@ export class TaskRunner {
    * @param {object} p
    * @param {string} p.text      用户原话
    * @param {object} p.identity  {id} 业务身份
-   * @returns {{result}|{suspended: true, clarify, stack}}
+   * @param {Array}  [p.history] 会话记忆（上一轮及更早的结构化摘要，来自 ConversationStore）
+   * @returns {{result}|{suspended: true, clarify, stack}} 另附 understanding（本轮理解摘要，供会话留档）
    */
-  async executeChatTask({ text, identity }) {
+  async executeChatTask({ text, identity, history = [] }) {
     const stack = this.#newStack()
+    // 会话记忆先铺底：理解层因此看得到"上一句说的是哪间教室/哪个时段"；
+    // 本任务内追问产生的对话（clarify ↔ 回复）继续追加在其后（chat-bridge 负责）
+    stack.taskContext.chat.history = [...history]
     stack.taskContext.chat.pendingTurn = { text }
     let run
     try {
       run = await stack.runEngine.run({ kind: 'chat', startState: 'IDLE', identity, taskContext: stack.taskContext })
     } catch (err) {
-      return { result: this.#forceUnresolved({ stack, err }) }
+      return { result: this.#forceUnresolved({ stack, err }), understanding: this.#chatSummary(stack) }
     }
     if (run.suspended) {
       // 挂起：任务未终态，保留栈等用户回复（resumeChat）
-      return { suspended: true, clarify: stack.taskContext.chat.clarify, stack }
+      return {
+        suspended: true,
+        clarify: stack.taskContext.chat.clarify,
+        stack,
+        understanding: this.#chatSummary(stack),
+      }
     }
     this.#pushRunResult(stack, run)
     if (run.terminal === 'UNRESOLVED') {
-      return { result: this.#finish(stack, 'UNRESOLVED') }
+      return { result: this.#finish(stack, 'UNRESOLVED'), understanding: this.#chatSummary(stack) }
     }
     // 剩余资源（D7 聊天多资源：槽位里解析出的第二间及以后）走同一队列
-    return this.#driveQueue({
+    const outcome = await this.#driveQueue({
       stack,
       identity,
       queue: (stack.taskContext.chat.resources ?? []).slice(1),
       startStateForFirst: 'GATHERING',
     })
+    return { ...outcome, understanding: this.#chatSummary(stack) }
+  }
+
+  /** 本轮的理解摘要（意图 + 槽位原话）——供会话记忆留档；未解析出时给中立值。 */
+  #chatSummary(stack) {
+    const tc = stack.taskContext
+    return {
+      intent: tc.intentId ?? tc.intent?.id ?? null,
+      slots: { ...(tc.chat?.slots ?? {}) },
+    }
   }
 
   /** 挂起任务恢复（追问回复；A6：会话内有效）。 */

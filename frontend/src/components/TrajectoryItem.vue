@@ -1,11 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useTaskStore } from '../stores/task.js'
-<<<<<<< HEAD
 import { useGlossaryStore } from '../stores/glossary.js'
-=======
 import { IconCheck, IconX, IconFlag, IconAlert, IconSpinner } from '../icons/index.js'
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 
 const props = defineProps({ event: { type: Object, required: true } })
 const store = useTaskStore()
@@ -58,17 +55,10 @@ const basisChips = computed(() => {
     .filter((b) => b.fact || b.proposition || b.rule)
     .map((b) =>
       b.fact
-<<<<<<< HEAD
         ? `依据 · ${glossary.factName(b.fact)}`
         : b.proposition
           ? `判定 · ${glossary.propositionName(b.proposition)}`
           : `处理规则 · ${glossary.ruleName(b.rule)}`,
-=======
-        ? `事实 ${FACT_NAMES[b.fact] ?? b.fact}`
-        : b.proposition
-          ? `命题 ${b.proposition}`
-          : `规则 ${b.rule}`
->>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
     )
 })
 

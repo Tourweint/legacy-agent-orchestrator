@@ -14,13 +14,22 @@ const MINUTE_MS = 60_000
 
 const WEEKDAY_ZH = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 } // 1=周一 … 7=周日
 
+// 时段词别名 → 三段区间的常量键。既用于"整串就是时段词"（"下午"），
+// 也用于精确钟点的前缀消歧（"下午两点"里的"下午"）。
 const SEGMENT_KEY_ALIASES = {
   morning: 'morning',
   上午: 'morning',
+  早上: 'morning',
+  早晨: 'morning',
+  清晨: 'morning',
   afternoon: 'afternoon',
   下午: 'afternoon',
+  午后: 'afternoon',
   evening: 'evening',
   晚上: 'evening',
+  傍晚: 'evening',
+  夜里: 'evening',
+  夜晚: 'evening',
 }
 
 export class TimeError extends Error {
@@ -130,6 +139,31 @@ export function resolveDatePhrase(phrase, now, options) {
     return { dateYmd: text, needsConfirm: false, explanations: [`显式日期 ${text}`] }
   }
 
+  const todayYmd = `${today.year}-${pad(today.month)}-${pad(today.day)}`
+
+  // 显式中文日期："10月1日""9月30号""10月1"——年份没说就是推断，故 needsConfirm（§7.3）
+  const monthDay = /^(\d{1,2})月(\d{1,2})[日号]?$/.exec(text)
+  if (monthDay) {
+    const month = Number(monthDay[1])
+    const day = Number(monthDay[2])
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      throw new TimeError(`不是合法的日期: ${text}`)
+    }
+    const thisYear = `${today.year}-${pad(month)}-${pad(day)}`
+    const nextYear = `${today.year + 1}-${pad(month)}-${pad(day)}`
+    // 规则：没说年份 → 取最近的一个将来（今年的该日期已过则取明年）
+    const dateYmd = thisYear < todayYmd ? nextYear : thisYear
+    return {
+      dateYmd,
+      needsConfirm: true,
+      explanations: [
+        thisYear < todayYmd
+          ? `「${text}」没说是哪一年；今年的 ${month} 月 ${day} 日已过 → 取明年的 ${dateYmd}`
+          : `「${text}」没说是哪一年 → 取今年的 ${dateYmd}`,
+      ],
+    }
+  }
+
   let deltaDays = null
   let rule = null
 
@@ -142,8 +176,11 @@ export function resolveDatePhrase(phrase, now, options) {
   } else if (text === '后天') {
     deltaDays = 2
     rule = '「后天」= 今天 + 2 天'
+  } else if (text === '大后天') {
+    deltaDays = 3
+    rule = '「大后天」= 今天 + 3 天'
   } else {
-      const weekMatch = /^(下下|下|本|这)?周([一二三四五六日天])$/.exec(text)
+      const weekMatch = /^(下下|下|本|这)?(?:周|星期|礼拜)([一二三四五六日天])$/.exec(text)
       if (weekMatch) {
         const targetIso = WEEKDAY_ZH[weekMatch[2]] - 1 // 周一=0 … 周日=6
         const prefix = weekMatch[1] || ''
@@ -213,13 +250,170 @@ export function resolveTimeSegment(segmentName, dateYmd, options) {
   }
 }
 
+// ---- 精确钟点表达（"一点到三点" / "14:00-16:00"）—— 第 08 章 §7.1 第二类 ----
+//
+// 为什么必须有这一段：意图计划的槽位提示与第 08 章 §7.1 表格**都已向用户承诺**
+// "上午八点到十点"这类精确说法，而此前只实现了三段（上午/下午/晚上）——用户说精确区间
+// 会被判"规则外"而追问，等于系统说得出、却听不懂。这里把承诺补齐。
+//
+// 纪律不变（第 08 章 §7.2）：纯函数、不查网络；规则外表达抛错追问，绝不猜；
+// 推算成功一律 needsConfirm（§7.3）。全程只有一条"推断"，且它本身是一条可写下来的规则：
+// 没说上午还是下午时（"两点到四点"），取唯一落在存量系统可预约窗口内的那个解释。
+
+const CN_DIGIT = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+
+/** 带 kind 的时间错误：调用方据 kind 分派追问话术（unparsed / range-incomplete）。 */
+function timeError(message, kind = 'unparsed') {
+  const err = new TimeError(message)
+  err.kind = kind
+  return err
+}
+
+/** 中文/阿拉伯小数字（"两""十""十五""二十三"/"8"）→ 数字；超范围返回 null。 */
+function parseSmallNumber(text) {
+  const s = String(text ?? '').trim()
+  if (!s) return null
+  if (/^\d{1,2}$/.test(s)) return Number(s)
+  if (/^十[一二三四五六七八九]?$/.test(s)) return 10 + (s === '十' ? 0 : CN_DIGIT[s[1]])
+  if (/^[一二两三四五六七八九]十[一二三四五六七八九]?$/.test(s)) {
+    const tens = CN_DIGIT[s[0]] * 10
+    return s.length === 2 ? tens : tens + CN_DIGIT[s[2]]
+  }
+  if (s.length === 1 && s in CN_DIGIT) return CN_DIGIT[s]
+  return null
+}
+
+// 钟点短语：[时段词] + 钟点 + 分隔符（点/时/:/：）+ 可选分钟（"半"或数字）
+const CLOCK_PHRASE_RE =
+  /^(上午|早上|早晨|清晨|下午|午后|晚上|傍晚|夜里|夜晚)?(\d{1,2}|[一二两三四五六七八九十]{1,3})[点时:：](\d{1,2}|[一二两三四五六七八九十]{1,3}|半)?分?$/
+
+/**
+ * 解析一个钟点短语 → { hour, minute, segmentWord }；不是钟点短语则返回 null。
+ * 只做词法，不做 12/24 小时消歧——那需要窗口常量，在 clockToMinutes 里做。
+ */
+function parseClockPhrase(text) {
+  const m = CLOCK_PHRASE_RE.exec(text)
+  if (!m) return null
+  if (m[3] === undefined && /[:：]/.test(m[0])) return null // "14:" 这类残句不接受
+  const hour = parseSmallNumber(m[2])
+  if (hour === null || hour > 23) return null
+  const rawMinute = m[3]
+  const minute = rawMinute === '半' ? 30 : rawMinute === undefined ? 0 : parseSmallNumber(rawMinute)
+  if (minute === null || minute > 59) return null
+  return { hour, minute, segmentWord: m[1] ?? null }
+}
+
+function hhmmToMinutes(hhmm) {
+  const [h, m] = String(hhmm).split(':').map(Number)
+  return h * 60 + m
+}
+
+function minutesToHhmm(minutes) {
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`
+}
+
+/** 可预约窗口（常量）→ 分钟数；缺常量时抛错——不猜窗口。 */
+function bookableWindowMinutes(options) {
+  const window = options?.legacyBookableWindow
+  if (!window?.start || !window?.end) {
+    throw timeError('缺少存量系统可预约窗口常量（constants.yaml 的 time.legacyBookableWindow）')
+  }
+  return { start: hhmmToMinutes(window.start), end: hhmmToMinutes(window.end) }
+}
+
+function inWindow(minutes, window) {
+  return minutes >= window.start && minutes <= window.end
+}
+
+/** 钟点短语 → 该日零时起的分钟数（含 12/24 小时消歧）。 */
+function clockToMinutes(clock, options) {
+  const { hour, minute, segmentWord } = clock
+  const key = segmentWord ? SEGMENT_KEY_ALIASES[segmentWord] : null
+  if (segmentWord && !key) throw timeError(`无法解释的时段词: ${segmentWord}`)
+  if (key === 'morning') {
+    if (hour > 12) throw timeError(`「${segmentWord}${hour}点」不成立——上午不会有 ${hour} 点`)
+    return hour * 60 + minute
+  }
+  if (key === 'afternoon') return (hour < 12 ? hour + 12 : hour) * 60 + minute
+  if (key === 'evening') {
+    if (hour === 12) throw timeError('「晚上十二点」会跨到第二天——本系统只办理当天内的时段')
+    return (hour < 12 ? hour + 12 : hour) * 60 + minute
+  }
+  // 无时段词：唯一规则——原值不在窗口内而 +12 小时落在窗口内时，取 +12。
+  // 例："两点" → 14:00（凌晨两点不在 07:00–22:30）；"八点" → 08:00（已在窗口内，不动）。
+  const window = bookableWindowMinutes(options)
+  const asIs = hour * 60 + minute
+  if (inWindow(asIs, window)) return asIs
+  const lifted = asIs + 12 * 60
+  if (hour <= 11 && inWindow(lifted, window)) return lifted
+  throw timeError(
+    `「${hour}点」不在可预约时段 ${minutesToHhmm(window.start)}–${minutesToHhmm(window.end)} 内`,
+  )
+}
+
+const RANGE_SEPARATOR_RE = /\s*(?:到|至|~|～|—|–|－|-)\s*/
+
+function parseClockRange(text) {
+  const parts = text.replace(/^从/, '').split(RANGE_SEPARATOR_RE)
+  if (parts.length !== 2) return null
+  const start = parseClockPhrase(parts[0])
+  const end = parseClockPhrase(parts[1])
+  if (!start || !end) return null
+  return { start, end }
+}
+
+function buildClockRange(range, text, dateYmd, options) {
+  let startMin = clockToMinutes(range.start, options)
+  let endMin = clockToMinutes(range.end, options)
+  if (endMin <= startMin) {
+    // "六点到八点"：结束点没带时段词时可能被窗口消歧成偏小的值——整体后移半天再试一次
+    const window = bookableWindowMinutes(options)
+    const lifted = endMin + 12 * 60
+    if (!range.end.segmentWord && lifted > startMin && inWindow(lifted, window)) endMin = lifted
+    else throw timeError(`「${text}」的结束时间不晚于开始时间（本系统只办理当天内的时段）`)
+  }
+  const [year, month, day] = String(dateYmd).split('-').map(Number)
+  const dayStart = wallToInstant({ year, month, day }, assertOptions(options))
+  const explanations = [`「${text}」= ${minutesToHhmm(startMin)}–${minutesToHhmm(endMin)}（部署地墙钟）`]
+  if (!range.start.segmentWord && !range.end.segmentWord) {
+    const window = bookableWindowMinutes(options)
+    explanations.push(
+      `没说上午/下午，按可预约时段 ${minutesToHhmm(window.start)}–${minutesToHhmm(window.end)} 判断为 ${minutesToHhmm(startMin)} 起`,
+    )
+  }
+  return {
+    start: new Date(dayStart.getTime() + startMin * MINUTE_MS),
+    end: new Date(dayStart.getTime() + endMin * MINUTE_MS),
+    needsConfirm: true,
+    explanations,
+  }
+}
+
+/**
+ * 把时段原话解析成该日期上的绝对时刻区间（第 08 章 §7.1 第二类的完整实现）。
+ * 三类说法：① 三段词"下午" ② 精确区间"14点到16点""下午两点到四点" ③ 单点"下午两点"。
+ * ③ 只说开始不说结束 → 抛 kind='range-incomplete'，由调用方追问时长（不猜默认时长）；
+ * 规则外表达 → 抛 kind='unparsed'，追问，不得猜测。
+ */
+export function resolveTimePhrase(phrase, dateYmd, options) {
+  const text = String(phrase ?? '').replace(/\s+/g, '')
+  if (!text) throw timeError('时段表达为空')
+  if (SEGMENT_KEY_ALIASES[text]) return resolveTimeSegment(text, dateYmd, options)
+  const range = parseClockRange(text)
+  if (range) return buildClockRange(range, text, dateYmd, options)
+  if (parseClockPhrase(text)) {
+    throw timeError(`「${text}」只说了开始时间，没说到几点结束`, 'range-incomplete')
+  }
+  throw timeError(`无法解释的时间表达: ${text}（规则集外的表达只能追问，不得猜测）`)
+}
+
 /**
  * 语义化组合：模糊日期 + 时段 → 绝对时刻区间。
  * 输入的槽位必须是原话片段（理解层不做换算），换算全部在这里、可审计。
  */
 export function resolveRelativeRange({ datePhrase, segmentName }, now, options) {
   const date = resolveDatePhrase(datePhrase, now, options)
-  const segment = resolveTimeSegment(segmentName, date.dateYmd, options)
+  const segment = resolveTimePhrase(segmentName, date.dateYmd, options)
   return {
     start: segment.start,
     end: segment.end,

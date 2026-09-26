@@ -76,7 +76,7 @@ export class UnderstandingEngine {
         this.#archiveModelOutput(text, { error: err.message }, attempt)
         throw err
       }
-      const verdict = validateUnderstandingOutput(llmResult.text, intentIds)
+      const verdict = validateUnderstandingOutput(llmResult.text, intentIds, text)
       this.#archiveModelOutput(text, verdict.ok ? verdict.value : { violations: verdict.violations, raw: llmResult.text }, attempt)
 
       if (verdict.ok) {

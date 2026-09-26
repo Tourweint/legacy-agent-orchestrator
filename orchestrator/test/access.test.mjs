@@ -531,3 +531,85 @@ test('多资源任务走同一入口：第二间冲突 → 自动回滚第一间
     ctx.server.close()
   }
 })
+
+// ── 会话记忆（跨轮上下文）──────────────────────────────────────────────────
+
+/** 自然语言入口；带 conversationId 就是"接着这段对话说"。 */
+async function postChat(ctx, body) {
+  const res = await fetch(`${ctx.base}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...withCookie(ctx.cookie) },
+    body: JSON.stringify(body),
+  })
+  return { httpStatus: res.status, body: await res.json() }
+}
+
+test('会话记忆端到端：同一 conversationId 的下一轮，理解层看得到上一轮说了什么', async () => {
+  const first = {
+    intent: 'borrow-classroom',
+    slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午' },
+    confidence: 0.9,
+    outOfDomain: false,
+  }
+  const second = {
+    intent: 'borrow-classroom',
+    slots: { classroomName: '数智楼123', datePhrase: '后天', timeSegment: '下午' },
+    confidence: 0.9,
+    outOfDomain: false,
+  }
+  const { base, server, llm } = await startServer({}, [first, second])
+  try {
+    const ctx = { base, cookie: (await teacherLogin(base)).cookie }
+
+    const r1 = await postChat(ctx, { text: '帮我借明天下午数智楼123' })
+    const conversationId = r1.body.data.conversationId
+    assert.ok(conversationId, '引擎要把 conversationId 发回来')
+    await awaitTerminal(ctx, r1.body.data.taskId)
+
+    // 第二轮：带上同一个 conversationId —— 这就是"接着说下一句"
+    const r2 = await postChat(ctx, { text: '那改成后天下午', conversationId })
+    assert.equal(r2.body.data.conversationId, conversationId, '同一会话沿用同一个 id')
+    await awaitTerminal(ctx, r2.body.data.taskId)
+
+    const secondCall = llm.calls[1]
+    assert.ok(
+      secondCall.some((m) => m.role === 'user' && m.content === '帮我借明天下午数智楼123'),
+      '上一轮原话要在场',
+    )
+    assert.ok(
+      secondCall.some((m) => m.role === 'assistant' && m.content.includes('数智楼123')),
+      '上一轮的结构化摘要要在场（"那"才有所指）',
+    )
+  } finally {
+    server.close()
+  }
+})
+
+test('会话记忆不跨用户：带别人的 conversationId 拿不到那些历史，也不会覆盖它', async () => {
+  const borrowOut = {
+    intent: 'borrow-classroom',
+    slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午' },
+    confidence: 0.9,
+    outOfDomain: false,
+  }
+  const mineOut = { intent: 'query-my-reservations', slots: {}, confidence: 0.9, outOfDomain: false }
+  const { base, server, llm } = await startServer({}, [borrowOut, mineOut])
+  try {
+    const teacher = { base, cookie: (await teacherLogin(base)).cookie }
+    const r1 = await postChat(teacher, { text: '帮我借明天下午数智楼123' })
+    const teacherConv = r1.body.data.conversationId
+    await awaitTerminal(teacher, r1.body.data.taskId)
+
+    const student = { base, cookie: (await studentLogin(base)).cookie }
+    const r2 = await postChat(student, { text: '我订了哪些教室', conversationId: teacherConv })
+    assert.notEqual(r2.body.data.conversationId, teacherConv, '他人的会话 id 不沿用，另发一个')
+    await awaitTerminal(student, r2.body.data.taskId)
+
+    assert.ok(
+      !llm.calls[1].some((m) => m.content === '帮我借明天下午数智楼123'),
+      '别人的会话历史不该出现在我的上下文里',
+    )
+  } finally {
+    server.close()
+  }
+})
