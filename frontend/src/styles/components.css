@@ -1,0 +1,295 @@
+/* 通用组件类 —— 2026-09-26 阶段一建立
+   设计原则：细描边优先于阴影；颜色只用于表达状态；hover 有多层反馈；focus-visible 明显。
+   使用方式：<button class="btn btn-primary">或 <div class="card"> */
+
+/* ========== 按钮（.btn） ========== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  font-family: inherit;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+  transform: translateY(0);
+  transition:
+    transform var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent-300);
+  background: var(--accent-50);
+  color: var(--accent-700);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-xs);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+  box-shadow: none;
+  transition-duration: var(--dur-instant);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* 主按钮 */
+.btn-primary {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: #ffffff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-600);
+  border-color: var(--accent-600);
+  color: #ffffff;
+}
+
+/* 危险按钮 */
+.btn-danger {
+  color: var(--danger-600);
+  border-color: var(--danger-200);
+  background: var(--danger-50);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-100);
+  border-color: var(--danger-300);
+  color: var(--danger-700);
+}
+
+/* 幽灵按钮（透明背景） */
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: transparent;
+  color: var(--text);
+  transform: none;
+  box-shadow: none;
+}
+
+/* 尺寸变体 */
+.btn-sm {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+}
+.btn-lg {
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--text-base);
+}
+
+/* 块级按钮（全宽） */
+.btn-block {
+  width: 100%;
+}
+
+/* ========== 卡片（.card） ========== */
+.card {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-5);
+  transition:
+    box-shadow var(--dur-base) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+}
+
+/* 悬浮卡片（hover 有反馈） */
+.card-hover:hover {
+  border-color: var(--accent-200);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ========== 徽章/标签（.chip） ========== */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--gray-500);
+  white-space: nowrap;
+}
+
+/* 语义变体 */
+.chip-accent {
+  color: var(--accent-600);
+  border-color: var(--accent-200);
+  background: var(--accent-50);
+}
+.chip-success {
+  color: var(--success-700);
+  border-color: var(--success-200);
+  background: var(--success-50);
+}
+.chip-danger {
+  color: var(--danger-600);
+  border-color: var(--danger-200);
+  background: var(--danger-50);
+}
+.chip-warning {
+  color: var(--warning-700);
+  border-color: var(--warning-200);
+  background: var(--warning-50);
+}
+.chip-neutral {
+  color: var(--gray-500);
+  border-color: var(--gray-200);
+  background: var(--gray-50);
+}
+
+/* ========== 输入框（.input） ========== */
+.input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-small);
+  outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+.input::placeholder {
+  color: var(--gray-400);
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--gray-300);
+}
+
+.input:focus {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px var(--accent-100);
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--surface-2);
+}
+
+/* 输入框尺寸 */
+.input-sm {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+.input-lg {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-base);
+}
+
+/* ========== 状态徽章（.badge） ========== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+
+.badge-success {
+  color: var(--success-700);
+  background: var(--success-100);
+}
+.badge-danger {
+  color: var(--danger-700);
+  background: var(--danger-100);
+}
+.badge-warning {
+  color: var(--warning-700);
+  background: var(--warning-100);
+}
+.badge-accent {
+  color: var(--accent-700);
+  background: var(--accent-100);
+}
+.badge-neutral {
+  color: var(--gray-600);
+  background: var(--gray-100);
+}
+
+/* 状态点（徽章前的小圆点） */
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ========== 辅助文本 ========== */
+.text-muted {
+  color: var(--text-muted);
+}
+.text-faint {
+  color: var(--text-faint);
+}
+.text-success {
+  color: var(--success-600);
+}
+.text-danger {
+  color: var(--danger-600);
+}
+.text-warning {
+  color: var(--warning-600);
+}
+.text-accent {
+  color: var(--accent-600);
+}
+.text-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* 减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .card,
+  .input {
+    transition-duration: 0.01ms !important;
+  }
+  .btn:hover:not(:disabled) {
+    transform: none;
+  }
+}

@@ -3,7 +3,14 @@
 // 事件排序以 seq 为准（§6.3 规格 1）；对话视图的助手消息由事件派生，不自行推断步骤（§6.1）。
 
 import { defineStore } from 'pinia'
-import { apiCancel, apiChat, apiEvidence, apiGetTask, apiPostTask, apiReply } from '../api/client.js'
+import {
+  apiCancel,
+  apiChat,
+  apiEvidence,
+  apiGetTask,
+  apiPostTask,
+  apiReply,
+} from '../api/client.js'
 import { openTaskStream } from '../api/sse.js'
 
 export const PHASES = [
@@ -20,7 +27,10 @@ export const useTaskStore = defineStore('task', {
     taskId: null,
     // running | suspended | terminal
     taskStatus: 'idle',
+    // SSE 连接状态：closed | connecting | open | reconnecting | failed
     sseState: 'closed',
+    reconnectAttempt: 0,
+    reconnectDelay: 0,
     events: [],
     entriesBySeq: {},
     result: null,
@@ -34,9 +44,12 @@ export const useTaskStore = defineStore('task', {
   getters: {
     terminalEvent: (s) => s.events.find((e) => e.type === 'terminal') ?? null,
     // 取消按钮矩阵（§4.5/B8）：出现 P3+ 事件即写请求已发出 → 禁用；挂起态可取消
-    writeIssued: (s) => s.events.some((e) => (e.phase ?? 'P6') >= 'P3' && ['P3', 'P4', 'P5'].includes(e.phase)),
+    writeIssued: (s) =>
+      s.events.some((e) => (e.phase ?? 'P6') >= 'P3' && ['P3', 'P4', 'P5'].includes(e.phase)),
     canCancel: (s) =>
-      s.taskStatus === 'suspended' || (s.taskStatus === 'running' && !s.events.some((e) => ['P3', 'P4', 'P5'].includes(e.phase ?? 'P6'))),
+      s.taskStatus === 'suspended' ||
+      (s.taskStatus === 'running' &&
+        !s.events.some((e) => ['P3', 'P4', 'P5'].includes(e.phase ?? 'P6'))),
     eventsByPhase: (s) => {
       const grouped = {}
       for (const p of PHASES) grouped[p.key] = []
@@ -52,6 +65,9 @@ export const useTaskStore = defineStore('task', {
     _reset() {
       this.taskId = null
       this.taskStatus = 'idle'
+      this.sseState = 'closed'
+      this.reconnectAttempt = 0
+      this.reconnectDelay = 0
       this.events = []
       this.entriesBySeq = {}
       this.result = null
@@ -71,6 +87,7 @@ export const useTaskStore = defineStore('task', {
 
     async _openStream(taskId) {
       this._stream?.close()
+      this.sseState = 'connecting'
       this._stream = openTaskStream(taskId, {
         onEvent: (event) => {
           this._applyEvent(event)
@@ -78,6 +95,14 @@ export const useTaskStore = defineStore('task', {
         },
         onState: (s) => {
           this.sseState = s
+          if (s === 'open') {
+            this.reconnectAttempt = 0
+            this.reconnectDelay = 0
+          }
+        },
+        onReconnectAttempt: (attempt, delay) => {
+          this.reconnectAttempt = attempt
+          this.reconnectDelay = delay
         },
       })
     },

@@ -39,3 +39,12 @@ npm-debug.log*
 
 # Runtime data (Redis AOF contains login session tokens — never commit)
 deploy/data/
+
+# Runtime logs and dumps (never commit)
+*.log.err
+*.rdb
+redis-5/
+redis-5.zip
+mock-legacy/backend/startup.log.err
+orchestrator/startup.log.err
+orchestrator/dump.rdb
