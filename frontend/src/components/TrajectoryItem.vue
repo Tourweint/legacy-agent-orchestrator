@@ -1,7 +1,11 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useTaskStore } from '../stores/task.js'
+<<<<<<< HEAD
 import { useGlossaryStore } from '../stores/glossary.js'
+=======
+import { IconCheck, IconX, IconFlag, IconAlert, IconSpinner } from '../icons/index.js'
+>>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 
 const props = defineProps({ event: { type: Object, required: true } })
 const store = useTaskStore()
@@ -42,7 +46,9 @@ const identity = computed(() => {
 
 const callName = computed(() => {
   const action = entry.value?.action ?? ''
-  return action.startsWith('contact:') ? (INTERFACE_NAMES[action.slice('contact:'.length)] ?? action) : null
+  return action.startsWith('contact:')
+    ? (INTERFACE_NAMES[action.slice('contact:'.length)] ?? action)
+    : null
 })
 
 // 依据芯片：说清"这条结论是凭什么下的"——用业务语义，不出现内部编号（零术语 P1-3）
@@ -52,10 +58,17 @@ const basisChips = computed(() => {
     .filter((b) => b.fact || b.proposition || b.rule)
     .map((b) =>
       b.fact
+<<<<<<< HEAD
         ? `依据 · ${glossary.factName(b.fact)}`
         : b.proposition
           ? `判定 · ${glossary.propositionName(b.proposition)}`
           : `处理规则 · ${glossary.ruleName(b.rule)}`,
+=======
+        ? `事实 ${FACT_NAMES[b.fact] ?? b.fact}`
+        : b.proposition
+          ? `命题 ${b.proposition}`
+          : `规则 ${b.rule}`
+>>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
     )
 })
 
@@ -85,17 +98,20 @@ async function toggleExpand() {
 
 <template>
   <div class="item" :class="'st-' + event.status">
-    <div class="row" @click="toggleExpand">
+    <div class="row" role="button" tabindex="0" @click="toggleExpand" @keydown.enter="toggleExpand">
       <span class="mark" aria-hidden="true">
-        <span v-if="event.status === 'running'" class="spin"></span>
-        <span v-else-if="event.status === 'done'" class="ok">✓</span>
-        <span v-else-if="event.status === 'failed'" class="bad">✗</span>
-        <span v-else-if="event.status === 'uncertain'" class="pulse"></span>
+        <IconSpinner v-if="event.status === 'running'" :size="12" class="spin-icon" />
+        <IconCheck v-else-if="event.status === 'done'" :size="12" class="ok" />
+        <IconX v-else-if="event.status === 'failed'" :size="12" class="bad" />
+        <IconFlag v-else-if="event.status === 'uncertain'" :size="12" class="pulse-icon" />
         <span v-else class="neutral">–</span>
       </span>
       <span class="text" :title="event.text">{{ displayText(event) }}</span>
       <span v-if="identity" class="chip identity">{{ identity }}</span>
-      <span v-if="injected" class="chip injected" title="本次运行包含故障注入">⚠ 注入</span>
+      <span v-if="injected" class="chip injected" title="本次运行包含故障注入">
+        <IconAlert :size="10" />
+        注入
+      </span>
       <span class="time mono muted">{{ timeOf(event) }}</span>
     </div>
 
@@ -103,7 +119,9 @@ async function toggleExpand() {
       <span v-for="(c, i) in basisChips" :key="i" class="chip basis">{{ c }}</span>
     </div>
 
-    <pre v-if="expanded && entry" class="raw mono">{{ JSON.stringify({ input: entry.input, metadata: entry.metadata, basis: entry.basis }, null, 2) }}</pre>
+    <pre v-if="expanded && entry" class="raw mono">{{
+      JSON.stringify({ input: entry.input, metadata: entry.metadata, basis: entry.basis }, null, 2)
+    }}</pre>
   </div>
 </template>
 
@@ -117,12 +135,26 @@ async function toggleExpand() {
   align-items: baseline;
   gap: var(--space-2);
   cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+
+.row:hover {
+  background: var(--surface-2);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 1px;
 }
 
 .mark {
   width: 16px;
   text-align: center;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
 }
 
 .ok {
@@ -135,40 +167,40 @@ async function toggleExpand() {
 
 .neutral {
   color: var(--text-faint);
+  font-size: var(--text-xs);
 }
 
-.spin,
-.pulse {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.spin-icon {
+  color: var(--accent);
+  animation: spin 0.9s linear infinite;
 }
 
-.spin {
-  border: 2px solid var(--text-faint);
-  border-top-color: var(--accent);
-  animation: rotate 0.9s linear infinite;
+.pulse-icon {
+  color: var(--status-uncertain);
+  animation: pulse 1.2s var(--ease-standard) infinite;
 }
 
-.pulse {
-  background: var(--status-uncertain);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes rotate {
-  to { transform: rotate(360deg); }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .text {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+  font-size: var(--text-sm);
 }
 
 .st-uncertain .text {
@@ -187,27 +219,33 @@ async function toggleExpand() {
 }
 
 .chip {
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: var(--border-width) solid var(--border);
   color: var(--text-muted);
   background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .chip.identity {
   color: var(--accent);
-  border-color: var(--accent);
+  border-color: var(--accent-200);
+  background: var(--accent-50);
 }
 
 .chip.injected {
   color: var(--status-uncertain);
   border-color: var(--status-uncertain);
-  font-weight: 600;
+  background: var(--status-uncertain-weak);
+  font-weight: var(--weight-semibold);
 }
 
 .time {
   flex-shrink: 0;
+  font-size: var(--text-xs);
 }
 
 .raw {
@@ -218,6 +256,6 @@ async function toggleExpand() {
   border-radius: var(--radius-small);
   overflow-x: auto;
   max-height: 220px;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 </style>

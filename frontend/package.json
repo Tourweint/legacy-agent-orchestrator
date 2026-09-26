@@ -6,7 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.cjs --fix",
+    "lint:check": "eslint . --ext .vue,.js,.cjs",
+    "format": "prettier --write \"src/**/*.{vue,js,css}\"",
+    "format:check": "prettier --check \"src/**/*.{vue,js,css}\"",
+    "lint:css": "stylelint \"src/**/*.{css,vue}\" --fix",
+    "lint:css:check": "stylelint \"src/**/*.{css,vue}\""
   },
   "dependencies": {
     "pinia": "^2.2.6",
@@ -14,6 +20,13 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-vue": "^9.33.0",
+    "prettier": "^3.9.9",
+    "stylelint": "^16.26.1",
+    "stylelint-config-recommended-vue": "^1.6.1",
+    "stylelint-config-standard": "^36.0.1",
     "vite": "^6.0.3"
   }
 }

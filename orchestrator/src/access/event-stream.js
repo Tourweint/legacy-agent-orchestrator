@@ -161,5 +161,5 @@ export class EventStream {
 
 /** SSE 帧格式。 */
 export function sseFrame(event) {
-  return `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+  return `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`
 }

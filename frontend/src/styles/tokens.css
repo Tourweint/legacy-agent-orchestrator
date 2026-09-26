@@ -1,29 +1,97 @@
 /* 设计变量 —— 第 10 章 §七（Stripe 风格取向 + 深浅双主题，G6）。
-   颜色只用于表达状态；层级靠字号与留白；细描边优先于阴影。 */
+   颜色只用于表达状态；层级靠字号与留白；细描边优先于阴影。
+   2026-09-26 升级：补全字号层级、完整色阶、阴影、z-index、断点、动效曲线（向后兼容，原有变量不变）。 */
 
+/* ========== 全局令牌（与主题无关） ========== */
 :root {
+  /* 字体族 */
   --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
 
-  --radius-card: 10px;
+  /* 字号层级（Major Third 1.25 比例） */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 36px;
+
+  /* 字重 */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* 行高 */
+  --leading-tight: 1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.7;
+
+  /* 圆角 */
+  --radius-xs: 4px;
   --radius-small: 6px;
+  --radius-card: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* 边框 */
   --border-width: 1px;
 
+  /* 间距（4px 基准） */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
 
+  /* 阴影层级（仅用于悬浮元素和模态层） */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 8px -2px rgba(16, 24, 40, 0.1), 0 2px 4px -2px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0 12px 16px -4px rgba(16, 24, 40, 0.12), 0 4px 6px -2px rgba(16, 24, 40, 0.05);
+  --shadow-xl: 0 20px 24px -4px rgba(16, 24, 40, 0.15), 0 8px 8px -4px rgba(16, 24, 40, 0.04);
+
+  /* 动画时长 */
+  --dur-instant: 80ms;
   --dur-fast: 120ms;
+  --dur-base: 200ms;
   --dur-slow: 240ms;
+  --dur-slower: 360ms;
+
+  /* 动效曲线 */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+  --ease-emphasized: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 断点（仅用于 CSS 注释参考，实际 @media 使用数值） */
+  --bp-sm: 640px;
+  --bp-md: 768px;
+  --bp-lg: 1024px;
+  --bp-xl: 1280px;
+  --bp-2xl: 1536px;
+
+  /* Z-Index 层级 */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
 }
 
-/* 浅色（默认） */
+/* ========== 浅色主题（默认） ========== */
 :root,
 :root[data-theme='light'] {
   color-scheme: light;
+
+  /* 基础表面（原有变量，保持不变） */
   --bg: #f7f8fa;
   --surface: #ffffff;
   --surface-2: #f2f4f7;
@@ -31,22 +99,85 @@
   --text: #1a1f36;
   --text-muted: #697386;
   --text-faint: #9aa4b8;
-  --accent: #5b5bd6;
-  --accent-weak: #eeeefc;
-  --on-accent: #ffffff;
 
-  --status-success: #0e9f6e;
-  --status-success-weak: #e3f5ee;
-  --status-danger: #d92d20;
-  --status-danger-weak: #fdeceb;
-  --status-uncertain: #b54708;
-  --status-uncertain-weak: #fdf1e2;
-  --status-neutral: #697386;
+  /* Accent 色阶（紫色系，500 为主色） */
+  --accent-50: #f3f3fc;
+  --accent-100: #e8e8f9;
+  --accent-200: #d1d1f3;
+  --accent-300: #b0b0e9;
+  --accent-400: #8b8bf0;
+  --accent-500: #5b5bd6;
+  --accent-600: #4a4ab8;
+  --accent-700: #3d3d96;
+  --accent-800: #33337a;
+  --accent-900: #2a2a63;
+  --accent: #5b5bd6; /* 原有变量别名 */
+  --accent-weak: #eeeefc; /* 原有变量别名 */
+  --on-accent: #ffffff; /* 原有变量 */
+
+  /* 中性色阶（Gray） */
+  --gray-50: #f7f8fa;
+  --gray-100: #eef0f4;
+  --gray-200: #e3e8ee;
+  --gray-300: #d1d7e0;
+  --gray-400: #9aa4b8;
+  --gray-500: #697386;
+  --gray-600: #4a5268;
+  --gray-700: #363d4f;
+  --gray-800: #252a38;
+  --gray-900: #1a1f36;
+
+  /* 状态色：成功（绿） */
+  --success-50: #e3f5ee;
+  --success-100: #c8ebdd;
+  --success-200: #95d7bc;
+  --success-300: #5fc298;
+  --success-400: #2fae7b;
+  --success-500: #0e9f6e;
+  --success-600: #0b855c;
+  --success-700: #0a7d56;
+  --success-800: #086646;
+  --success-900: #065238;
+  --status-success: #0e9f6e; /* 原有变量别名 */
+  --status-success-weak: #e3f5ee; /* 原有变量别名 */
+
+  /* 状态色：危险/失败（红） */
+  --danger-50: #fdeceb;
+  --danger-100: #fbd5d2;
+  --danger-200: #f7aaa4;
+  --danger-300: #f2746a;
+  --danger-400: #e8483b;
+  --danger-500: #d92d20;
+  --danger-600: #b42318;
+  --danger-700: #91201a;
+  --danger-800: #7a1f1b;
+  --danger-900: #661c19;
+  --status-danger: #d92d20; /* 原有变量别名 */
+  --status-danger-weak: #fdeceb; /* 原有变量别名 */
+
+  /* 状态色：不确定/警告（橙） */
+  --warning-50: #fdf1e2;
+  --warning-100: #fbe0c2;
+  --warning-200: #f7c084;
+  --warning-300: #f2a047;
+  --warning-400: #d97f1c;
+  --warning-500: #b54708;
+  --warning-600: #93370d;
+  --warning-700: #7a2e0e;
+  --warning-800: #662810;
+  --warning-900: #552210;
+  --status-uncertain: #b54708; /* 原有变量别名 */
+  --status-uncertain-weak: #fdf1e2; /* 原有变量别名 */
+
+  /* 状态色：中性 */
+  --status-neutral: #697386; /* 原有变量 */
 }
 
-/* 深色（投影环境风险对冲，G6） */
+/* ========== 深色主题（投影环境风险对冲，G6） ========== */
 :root[data-theme='dark'] {
   color-scheme: dark;
+
+  /* 基础表面（原有变量，保持不变） */
   --bg: #0f131c;
   --surface: #171d2a;
   --surface-2: #1e2534;
@@ -54,15 +185,76 @@
   --text: #e7eaf2;
   --text-muted: #98a2b8;
   --text-faint: #6b7488;
-  --accent: #8b8bf0;
-  --accent-weak: #242447;
-  --on-accent: #0f131c;
 
-  --status-success: #34c98f;
-  --status-success-weak: #12301f;
-  --status-danger: #f2746a;
-  --status-danger-weak: #3c1a18;
-  --status-uncertain: #eda23c;
-  --status-uncertain-weak: #3a2a12;
-  --status-neutral: #98a2b8;
+  /* Accent 色阶（深色调亮） */
+  --accent-50: #1a1a3a;
+  --accent-100: #242447;
+  --accent-200: #333366;
+  --accent-300: #5555aa;
+  --accent-400: #7a7adf;
+  --accent-500: #8b8bf0;
+  --accent-600: #a0a0f4;
+  --accent-700: #b5b5f7;
+  --accent-800: #cacafa;
+  --accent-900: #dfdffc;
+  --accent: #8b8bf0; /* 原有变量别名 */
+  --accent-weak: #242447; /* 原有变量别名 */
+  --on-accent: #0f131c; /* 原有变量 */
+
+  /* 中性色阶（深色） */
+  --gray-50: #1a1f2e;
+  --gray-100: #232a3a;
+  --gray-200: #2a3247;
+  --gray-300: #3a4359;
+  --gray-400: #6b7488;
+  --gray-500: #98a2b8;
+  --gray-600: #b0b8c8;
+  --gray-700: #c8cdda;
+  --gray-800: #dde0e8;
+  --gray-900: #e7eaf2;
+
+  /* 状态色：成功（深色调亮） */
+  --success-50: #0a2818;
+  --success-100: #12301f;
+  --success-200: #1a4a2e;
+  --success-300: #247044;
+  --success-400: #2c9458;
+  --success-500: #34c98f;
+  --success-600: #55d4a3;
+  --success-700: #77dfb7;
+  --success-800: #99eacb;
+  --success-900: #bbf5df;
+  --status-success: #34c98f; /* 原有变量别名 */
+  --status-success-weak: #12301f; /* 原有变量别名 */
+
+  /* 状态色：危险（深色调亮） */
+  --danger-50: #2a1210;
+  --danger-100: #3c1a18;
+  --danger-200: #552420;
+  --danger-300: #80332c;
+  --danger-400: #b8473c;
+  --danger-500: #f2746a;
+  --danger-600: #f59088;
+  --danger-700: #f7aca6;
+  --danger-800: #fac8c4;
+  --danger-900: #fce4e2;
+  --status-danger: #f2746a; /* 原有变量别名 */
+  --status-danger-weak: #3c1a18; /* 原有变量别名 */
+
+  /* 状态色：不确定（深色调亮） */
+  --warning-50: #2a1e0a;
+  --warning-100: #3a2a12;
+  --warning-200: #55401c;
+  --warning-300: #806028;
+  --warning-400: #b88a34;
+  --warning-500: #eda23c;
+  --warning-600: #f1b560;
+  --warning-700: #f5c884;
+  --warning-800: #f9dba8;
+  --warning-900: #fbeecc;
+  --status-uncertain: #eda23c; /* 原有变量别名 */
+  --status-uncertain-weak: #3a2a12; /* 原有变量别名 */
+
+  /* 状态色：中性 */
+  --status-neutral: #98a2b8; /* 原有变量 */
 }

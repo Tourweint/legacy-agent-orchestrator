@@ -10,4 +10,18 @@ export default defineConfig({
       '/api': 'http://localhost:8090',
     },
   },
+  build: {
+    // 生产构建目标：现代浏览器，减小体积
+    target: 'es2020',
+    // CSS 代码分割
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: {
+        // 手动分包：框架依赖单独成 chunk，利于长期缓存
+        manualChunks: {
+          vendor: ['vue', 'pinia'],
+        },
+      },
+    },
+  },
 })

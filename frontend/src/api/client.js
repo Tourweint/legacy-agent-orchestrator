@@ -5,6 +5,8 @@
 // 前端经 `/api` 同源代理访问，浏览器自动携带——前端**不持有任何令牌**（拿不到也不该拿）。
 // 401 的含义：未登录（4010）或登录已失效（4011），由调用方交会话状态处理。
 
+import { ENDPOINTS } from './endpoints.js'
+
 async function request(path, options = {}) {
   const res = await fetch(path, {
     credentials: 'same-origin', // 同源代理下携带会话 Cookie
@@ -16,9 +18,10 @@ async function request(path, options = {}) {
 }
 
 export function apiHealth() {
-  return request('/api/health')
+  return request(ENDPOINTS.health)
 }
 
+<<<<<<< HEAD
 // ---- 登录三件套（对外接口清单 §9–§11）----
 
 /** 用校园系统原有账号登录；成功后引擎下发会话 Cookie，响应体不含任何令牌。 */
@@ -49,21 +52,26 @@ export function apiGlossary() {
 /** 自然语言入口（理解层 → 同一编排）。身份由会话派生，不再传 identity。 */
 export function apiChat(text) {
   return request('/api/chat', { method: 'POST', body: JSON.stringify({ text }) })
+=======
+/** 自然语言入口（理解层 → 同一编排）。 */
+export function apiChat(text, identity) {
+  return request(ENDPOINTS.chat, { method: 'POST', body: JSON.stringify({ text, identity }) })
+>>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
 }
 
 /** 结构化任务入口（无 LLM 路径；调试入口 G5）。 */
 export function apiPostTask(task) {
-  return request('/api/tasks', { method: 'POST', body: JSON.stringify(task) })
+  return request(ENDPOINTS.tasks, { method: 'POST', body: JSON.stringify(task) })
 }
 
 /** 任务快照（含挂起时的 clarify 与终态结果）。 */
 export function apiGetTask(taskId) {
-  return request(`/api/tasks/${encodeURIComponent(taskId)}`)
+  return request(ENDPOINTS.task(taskId))
 }
 
 /** 追问回复（挂起任务恢复）。 */
 export function apiReply(taskId, text) {
-  return request(`/api/tasks/${encodeURIComponent(taskId)}/reply`, {
+  return request(ENDPOINTS.taskReply(taskId), {
     method: 'POST',
     body: JSON.stringify({ text }),
   })
@@ -71,10 +79,10 @@ export function apiReply(taskId, text) {
 
 /** 取消（B8：写请求发出前生效）。 */
 export function apiCancel(taskId) {
-  return request(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' })
+  return request(ENDPOINTS.task(taskId), { method: 'DELETE' })
 }
 
 /** 证据链导出（evidenceRef 的解析来源，§6.3 规格 4）。 */
 export function apiEvidence(taskId) {
-  return request(`/api/tasks/${encodeURIComponent(taskId)}/evidence`)
+  return request(ENDPOINTS.taskEvidence(taskId))
 }

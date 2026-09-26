@@ -23,6 +23,9 @@ const constants = store.getConstants()
 const baseUrl =
   process.env[constants.contact.legacyBaseUrlEnv] || constants.contact.legacyBaseUrlDefault
 const port = Number.parseInt(process.env.ORCH_PORT ?? '8090', 10)
+// P1：默认只绑定本机回环地址，避免 8090 暴露到非本机网络；
+// 如需对外提供服务，显式设置 ORCH_BIND_HOST=0.0.0.0 或具体网卡地址。
+const bindHost = process.env.ORCH_BIND_HOST ?? '127.0.0.1'
 
 const chaos = new ChaosController({ configStore: store })
 if (process.env.ORCH_CHAOS_INJECT) {
@@ -44,6 +47,7 @@ const identityPool = new IdentityPool({ configStore: store, transport, adapters,
 const userTokenStore = new UserTokenStore({ configStore: store, transport, adapters, constants })
 const sessionStore = new SessionStore({ constants })
 
+<<<<<<< HEAD
 // 启动自检：服务只读身份的凭证必须齐备（2026-09-25 冒烟实测踩到）
 // 缺凭证时引擎本来也能"起来"，但每个任务都会以"任务异常终止"收场——看起来像业务问题、
 // 其实是环境问题。宁可启动即失败并指明缺哪个变量（一键启动脚本已内置演示账号默认值）。
@@ -69,6 +73,11 @@ const { server } = createAccessServer({
 })
 server.listen(port, () => {
   console.log(`[orchestrator] 编排引擎已启动 → http://localhost:${port}`)
+=======
+const { server } = createAccessServer({ configStore: store, transport, identityPool, adapters })
+server.listen(port, bindHost, () => {
+  console.log(`[orchestrator] 编排引擎已启动 → http://${bindHost}:${port}`)
+>>>>>>> ee803542ba91a4ad7d47213fca4cd7dfa3eb65c2
   console.log(`[orchestrator] 存量系统：${baseUrl}`)
   console.log('[orchestrator] 端点：POST /api/auth/login · GET /api/auth/me · POST /api/chat · POST /api/tasks · GET /api/tasks/:id/events (SSE) · GET /api/health')
   console.log('[orchestrator] 登录后所有业务端点需携带会话（Cookie orch_session 或 Authorization: Bearer）')

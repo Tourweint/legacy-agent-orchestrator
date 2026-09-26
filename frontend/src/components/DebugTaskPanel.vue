@@ -12,8 +12,8 @@ const draft = ref(
       resources: [{ classroom: { classroomId: 5 } }],
     },
     null,
-    2,
-  ),
+    2
+  )
 )
 const error = ref('')
 
