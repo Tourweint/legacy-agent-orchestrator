@@ -29,14 +29,21 @@ REDIS_PORT="${SPRING_DATA_REDIS_PORT:-6379}"
 MYSQL_BIN="${MYSQL_BIN:-}"
 REDIS_CLI="${REDIS_CLI:-}"
 
-# 自动探测可执行文件位置（这些工具通常不在 Git Bash 的 PATH 里）
+# 自动探测可执行文件位置（这些工具通常不在 bash 的 PATH 里）。
+# bash 可能是 Git Bash（/c/...）也可能是 WSL（/mnt/c/...），两套路径都探测。
 if [ -z "$MYSQL_BIN" ]; then
-  for c in mysql "/c/Program Files/MariaDB 12.1/bin/mysql.exe" "/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe"; do
+  for c in mysql \
+    "/c/Program Files/MariaDB 12.1/bin/mysql.exe" \
+    "/mnt/c/Program Files/MariaDB 12.1/bin/mysql.exe" \
+    "/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" \
+    "/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe"; do
     if command -v "$c" > /dev/null 2>&1 || [ -x "$c" ]; then MYSQL_BIN="$c"; break; fi
   done
 fi
 if [ -z "$REDIS_CLI" ]; then
-  for c in redis-cli "$HOME/scoop/apps/redis/current/redis-cli.exe" "/c/Program Files/Redis/redis-cli.exe"; do
+  for c in redis-cli "$HOME/scoop/apps/redis/current/redis-cli.exe" \
+    "/c/Program Files/Redis/redis-cli.exe" \
+    "/mnt/c/Program Files/Redis/redis-cli.exe"; do
     if command -v "$c" > /dev/null 2>&1 || [ -x "$c" ]; then REDIS_CLI="$c"; break; fi
   done
 fi

@@ -33,8 +33,10 @@ count_rows()        { json_rows | grep -c '"status":"'; }
 
 # 三个身份各登录**一次**（顺序纪律：本脚本用完即退，少占设备会话名额；§九 9.3）
 legacy_token() {
+  # 设备会话预算：与 demo-prepare / demo-cleanup 共用同一设备 ID（同 ID 重登只顶替自己）。
+  DEMO_DEVICE_ID="${ORCH_DEMO_DEVICE_ID:-demo-scripts}"
   curl -s --max-time 5 "$LEGACY/auth/login" -X POST -H "Content-Type: application/json" \
-    -H "X-Device-Id: demo-checklist" -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
+    -H "X-Device-Id: $DEMO_DEVICE_ID" -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
     | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p'
 }
 ADMIN_AUTH=$(legacy_token admin "${ORCH_LEGACY_ADMIN_PASSWORD:-}")

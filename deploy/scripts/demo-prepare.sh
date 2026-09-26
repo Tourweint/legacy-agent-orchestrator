@@ -21,8 +21,12 @@ LEGACY="$ORCH_LEGACY_BASE"
 SCENE="${1:?用法: demo-prepare.sh <maintenance|occupy|occupy-222|mine>}"
 
 login_token() { # $1=用户名 $2=口令 → access token
+  # 设备会话预算（同账号最多 3 个设备槽，新设备登录会挤掉最老的槽）：
+  # 浏览器 1 槽 + 引擎（orchestrator-engine）1 槽 + 演示脚本共用的这 1 槽 = 恰好 3。
+  # 三个脚本必须共用同一个设备 ID——同 ID 重登只顶替自己，不会挤掉浏览器/引擎。
+  DEMO_DEVICE_ID="${ORCH_DEMO_DEVICE_ID:-demo-scripts}"
   curl -s --max-time 5 "$LEGACY/auth/login" -X POST -H "Content-Type: application/json" \
-    -H "X-Device-Id: demo-prepare" -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
+    -H "X-Device-Id: $DEMO_DEVICE_ID" -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
     | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p'
 }
 

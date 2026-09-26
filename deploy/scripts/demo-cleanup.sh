@@ -20,8 +20,11 @@ load_legacy_credentials "$ROOT"
 LEGACY="$ORCH_LEGACY_BASE"
 
 login_token() {
+  # 设备会话预算：与 demo-prepare / demo-checklist 共用同一设备 ID（同 ID 重登只顶替自己，
+  # 不会新开槽挤掉浏览器或引擎的会话）。
+  DEMO_DEVICE_ID="${ORCH_DEMO_DEVICE_ID:-demo-scripts}"
   curl -s --max-time 5 "$LEGACY/auth/login" -X POST -H "Content-Type: application/json" \
-    -H "X-Device-Id: demo-cleanup" -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
+    -H "X-Device-Id: $DEMO_DEVICE_ID" -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
     | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p'
 }
 
