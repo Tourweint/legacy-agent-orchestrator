@@ -278,5 +278,9 @@ export class ProtocolAdapters {
 
     // 创建成功时 data 就是新记录 id（基线 §7.2 实测：{"code":200,"data":115}）
     'reservation-create': (data) => ({ recordId: data ?? null }),
+    // 座位预约与教室预约同形（2026-09-26 实测补）：原缺这一条 → 结果卡里"记录 #—"（空值），
+    // 现场观众一眼能看出这是没接上的地方。宽松兼容数字与 {id} 两种形态。
+    'reservation-seat-create': (data) =>
+      ({ recordId: typeof data === 'number' ? data : (data?.id ?? null) }),
   }
 }

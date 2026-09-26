@@ -41,7 +41,7 @@ ADMIN_AUTH=$(legacy_token admin "${ORCH_LEGACY_ADMIN_PASSWORD:-}")
 TEACHER_AUTH=$(legacy_token 233 "${ORCH_LEGACY_TEACHER_PASSWORD:-}")
 STUDENT_AUTH=$(legacy_token abc "${ORCH_LEGACY_STUDENT_PASSWORD:-}")
 
-echo "== 演示前检查清单（第 11 章 §六，共 14 项）=="
+echo "== 演示前检查清单（第 11 章 §六；自动 15 项 + 1 项人工）=="
 
 # 2. Redis 存活（先于 1 的复位依赖说明：复位脚本自身会清 Redis）
 if (exec 3<>/dev/tcp/127.0.0.1/6379) 2>/dev/null; then ok 2 "Redis 存活"; exec 3<&-; else bad 2 "Redis 未监听（登录后全 401，第 11 章 §4.1）"; fi
@@ -133,6 +133,11 @@ fi
 # 13. 时间链路复验（第 06 章 §6.3）：归一化三段落在可预约时段内 —— 由常量与测试保证，此处核对常量值
 seg=$(grep -c "08:00" "$ROOT/orchestrator/config/constants.yaml" 2>/dev/null || echo 0)
 if [ "$seg" -ge 1 ]; then ok 13 "归一化三段常量在位（08–12/13–17/18–22；UTC 解释链路由 npm test 覆盖）"; else bad 13 "constants.yaml 三段常量缺失"; fi
+
+# 15. 存量系统界面在线（双屏对照的右侧那一屏；start-all.bat legacyui 启动，2026-09-26 增补）
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://localhost:5174/ 2>/dev/null)
+if [ "$code" = "200" ]; then ok 15 "存量系统界面在线（5174，双屏对照用；登录走存量系统自己的登录页）"
+else bad 15 "存量系统界面 5174 不可达（启动法：start-all.bat legacyui；缺它不影响引擎，但双屏对照少一屏）"; fi
 
 # 11. 深浅主题（需人工目视——投影环境）
 echo "  ○ [11] 深浅主题请人工目视确认（投影环境；脚本无法替代）"

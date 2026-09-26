@@ -114,6 +114,10 @@ test('响应归一化：出参无时区时间字符串按 UTC 解释为绝对时
 
 test('响应归一化：创建成功 data 即记录 id；座位占用返回座位 id 数组', () => {
   assert.deepEqual(adapters.normalizeData(iface('edu.reservation.classroom.create'), 115), { recordId: 115 })
+  // C12 补：座位预约的创建响应也要归一化成 recordId（否则结果卡里显示"记录 #—"）
+  assert.deepEqual(adapters.normalizeData(iface('edu.reservation.seat.create'), 269), { recordId: 269 })
+  assert.deepEqual(adapters.normalizeData(iface('edu.reservation.seat.create'), { id: 269 }), { recordId: 269 })
+  assert.deepEqual(adapters.normalizeData(iface('edu.reservation.seat.create'), null), { recordId: null })
   const seats = adapters.normalizeData(iface('edu.classroom.reservedSeats'), [309, 310])
   assert.deepEqual(seats, { seatIds: [309, 310], occupiedSeatCount: 2 })
 })

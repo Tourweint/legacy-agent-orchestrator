@@ -7,13 +7,16 @@ rem ============================================================================
 rem  一键启动（Windows）—— 存量系统 8080 / 编排引擎 8090 / 对话前端 5173
 rem
 rem  用法（双击运行等价于 all）：
-rem    start-all.bat [all|legacy|engine|web|deps|dry]
-rem      all      启动三个进程（默认）
-rem      legacy   只启动存量系统（8080）
-rem      engine   只启动编排引擎（8090）
-rem      web      只启动前端（5173）
-rem      deps     只做前置检查，不启动任何进程
-rem      dry      只打印将要执行的命令，不启动、不等待
+rem    start-all.bat [all|legacy|legacyui|engine|web|deps|dry]
+rem      all       启动四个进程（默认）
+rem      legacy    只启动存量系统后端（8080）
+rem      legacyui  只启动存量系统**界面**（5174）——双屏对照的右侧那一屏；
+rem                它就是存量系统自带的前端，本脚本只用命令行覆盖端口
+rem                （存量前端默认端口 5173 与我们的对话前端撞车），**不改它的任何文件**
+rem      engine    只启动编排引擎（8090）
+rem      web       只启动对话前端（5173）
+rem      deps      只做前置检查，不启动任何进程
+rem      dry       只打印将要执行的命令，不启动、不等待
 rem
 rem  可选的环境变量文件（存在即载入，不存在用内置默认值）：
 rem    deploy\config\legacy.env        存量系统库/Redis/JDK 配置（模板见 legacy.env.example）
@@ -34,7 +37,7 @@ set "FAILED=0"
 
 echo ============================================================================
 echo  legacy-agent-orchestrator 一键启动     仓库：%ROOT%
-echo  模式：%MODE% ^(all/legacy/engine/web/deps/dry^)
+echo  模式：%MODE% ^(all/legacy/legacyui/engine/web/deps/dry^)
 echo ============================================================================
 echo.
 
@@ -80,6 +83,7 @@ call :checkCmd mvn  "Maven（存量系统需要）"
 call :checkDir "%JDK17_HOME%\bin\java.exe" "JDK 17（%JDK17_HOME%）"
 if not exist "%ROOT%\orchestrator\node_modules" echo   [提示] orchestrator\node_modules 不存在，引擎首次启动前请执行：cd orchestrator ^&^& npm install
 if not exist "%ROOT%\frontend\node_modules" set "NEED_WEB_INSTALL=1"
+if not exist "%ROOT%\mock-legacy\frontend\node_modules" set "NEED_LEGACYUI_INSTALL=1"
 
 call :portListening 6379
 if errorlevel 1 (echo   [✗] Redis 6379 未监听 —— 登录后所有接口会返回 401，请先启动 Redis) else echo   [√] Redis 6379
@@ -92,6 +96,8 @@ call :portListening 8090
 if errorlevel 1 (set "P8090=0" & echo   [√] 端口 8090 空闲) else (set "P8090=1" & echo   [警告] 端口 8090 已被占用 —— 引擎疑似已在运行，本次跳过^(注意：旧进程可能仍是缺陷版本，见 docs/变更记录/2026-09-25-引擎入口缺陷修复与一键启动脚本.md^))
 call :portListening 5173
 if errorlevel 1 (set "P5173=0" & echo   [√] 端口 5173 空闲) else (set "P5173=1" & echo   [警告] 端口 5173 已被占用 —— 前端疑似已在运行，本次跳过)
+call :portListening 5174
+if errorlevel 1 (set "P5174=0" & echo   [√] 端口 5174 空闲) else (set "P5174=1" & echo   [警告] 端口 5174 已被占用 —— 存量系统界面疑似已在运行，本次跳过)
 echo.
 
 if /i "%MODE%"=="deps" goto :summary
@@ -105,6 +111,7 @@ set "JAVA_HOME=%JDK17_HOME%"
 set "PATH=%JDK17_HOME%\bin;%PATH%"
 
 if /i "%MODE%"=="legacy" goto :startLegacy
+if /i "%MODE%"=="legacyui" goto :startLegacyUI
 if /i "%MODE%"=="engine" goto :startEngine
 if /i "%MODE%"=="web" goto :startWeb
 if /i "%MODE%"=="all" goto :startLegacy
@@ -126,11 +133,26 @@ goto :startWeb
 :startWeb
 if /i "%MODE%"=="legacy" goto :waitLoop
 if /i "%MODE%"=="engine" goto :waitLoop
-if "%P5173%"=="1" goto :waitLoop
+if "%P5173%"=="1" goto :startLegacyUI
 if defined NEED_WEB_INSTALL (
   call :launch "对话前端 5173" "%ROOT%\frontend" "npm install && npm run dev"
 ) else (
   call :launch "对话前端 5173" "%ROOT%\frontend" "npm run dev"
+)
+if /i "%MODE%"=="web" goto :waitLoop
+goto :startLegacyUI
+
+:startLegacyUI
+if /i "%MODE%"=="legacy" goto :waitLoop
+if /i "%MODE%"=="engine" goto :waitLoop
+if /i "%MODE%"=="web" goto :waitLoop
+if "%P5174%"=="1" goto :waitLoop
+rem 存量系统自带前端的默认端口是 5173（与我们的对话前端撞车）：只从命令行覆盖端口，
+rem 不写它的任何配置文件——"对存量系统零改动"是演示里要当场证明的东西。
+if defined NEED_LEGACYUI_INSTALL (
+  call :launch "存量界面 5174" "%ROOT%\mock-legacy\frontend" "npm ci && npm run dev -- --port 5174 --strictPort"
+) else (
+  call :launch "存量界面 5174" "%ROOT%\mock-legacy\frontend" "npm run dev -- --port 5174 --strictPort"
 )
 
 rem ------------------------------------------------------------------ 等待就绪 --
@@ -161,6 +183,14 @@ if /i "%MODE%"=="web" if "%P5173%"=="0" (
   call :waitPort 5173 30
   if errorlevel 1 (echo   [✗] 前端 5173 未就绪) else echo   [√] 前端 5173
 )
+if /i "%MODE%"=="all" if "%P5174%"=="0" (
+  call :waitPort 5174 60
+  if errorlevel 1 (echo   [✗] 存量界面 5174 未就绪 —— 首次启动要先装依赖，看那个窗口的日志) else echo   [√] 存量界面 5174
+)
+if /i "%MODE%"=="legacyui" if "%P5174%"=="0" (
+  call :waitPort 5174 60
+  if errorlevel 1 (echo   [✗] 存量界面 5174 未就绪 —— 首次启动要先装依赖，看那个窗口的日志) else echo   [√] 存量界面 5174
+)
 if /i "%MODE%"=="engine" call :probeHealth "http://localhost:8090/api/health"
 if /i "%MODE%"=="all" call :probeHealth "http://localhost:8090/api/health"
 echo.
@@ -172,7 +202,12 @@ echo  入口与下一步
 echo ----------------------------------------------------------------------------
 echo   前端（对话界面）  http://localhost:5173
 echo   编排引擎健康检查  http://localhost:8090/api/health
-echo   存量系统          http://localhost:8080        （Swagger: /swagger-ui.html）
+echo   存量系统后端      http://localhost:8080        （Swagger: /swagger-ui.html）
+echo   存量系统界面      http://localhost:5174        （双屏对照的右侧那一屏；同一份存量前端，
+echo                                                   只用命令行改了端口——对存量系统零改动）
+echo.
+echo   双屏对照用法：引擎办完一件事，切到 5174 用办理人账号登录 →「我的预约」，
+echo                 能直接看到他名下那条真实记录（管理端全部记录见 /admin/reservations）。
 echo.
 echo   验证引擎回归：    cd orchestrator ^&^& npm test ^&^& npm run check
 echo   演示前 14 项检查：bash deploy/scripts/demo-checklist.sh   ^(需 Git Bash^)
