@@ -6,6 +6,8 @@ import DebugTaskPanel from './DebugTaskPanel.vue'
 import EmptyState from './EmptyState.vue'
 import ErrorState from './ErrorState.vue'
 import Composer from './Composer.vue'
+import ThinkingBlock from './ThinkingBlock.vue'
+import AnswerBubble from './AnswerBubble.vue'
 import { IconX } from '../icons/index.js'
 
 const store = useTaskStore()
@@ -37,10 +39,11 @@ function useExample(text) {
   send()
 }
 
-// 对话视图的助手侧消息全部由事件派生（§6.1：不自行推断）——按轮取，历史轮照常显示
-function assistantMessagesOf(turn) {
+// 追问属于**核心输出**（用户必须当场看到问题才答得上），仍然逐条显示；
+// 终态结论交给 AnswerBubble、过程交给 ThinkingBlock——助手侧内容一律由事件派生（§6.1）
+function clarifyMessagesOf(turn) {
   return turn.events
-    .filter((e) => e.type === 'input-required' || e.type === 'terminal')
+    .filter((e) => e.type === 'input-required')
     .map((e) => ({ seq: e.seq, kind: e.type, text: e.text }))
 }
 
@@ -145,7 +148,14 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
           {{ text }}
         </div>
 
-        <template v-for="m in assistantMessagesOf(turn)" :key="'a' + m.seq">
+        <!-- 过程：折叠起来按需展开（默认收起；办不成时自动展开失败链） -->
+        <ThinkingBlock
+          :events="turn.events"
+          :status="turn.status"
+          :cancelled="turn.cancelled === true"
+        />
+
+        <template v-for="m in clarifyMessagesOf(turn)" :key="'a' + m.seq">
           <div
             class="bubble assistant animate-message-left"
             :class="{
@@ -179,6 +189,9 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
             </button>
           </div>
         </template>
+
+        <!-- 结论：核心输出（唯一默认可见的助手内容） -->
+        <AnswerBubble :turn="turn" />
       </template>
     </div>
 
@@ -226,6 +239,10 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
   height: 640px;
   position: sticky;
   top: var(--space-5);
+  /* 宽屏下对话不要拉得太散（阅读宽度上限），并在剩余空间里居中 */
+  width: 100%;
+  max-width: 920px;
+  justify-self: center;
 }
 
 .pane-head {

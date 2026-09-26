@@ -74,6 +74,29 @@ export function openTaskStream(taskId, handlers) {
     }, delay)
   }
 
+  /**
+   * 单帧统一处理器：命名帧与默认帧共用一条路径。
+   * 引擎当前发的是默认帧（无 `event:` 行，类型在 data 内的 event.type），主路径是 onmessage；
+   * 但帧格式历史上变过（曾按类型命名发送），两条路都接上，任何格式都不会静默丢步。
+   */
+  function handleFrame(msg) {
+    try {
+      const event = JSON.parse(msg.data)
+      if (event.type === 'terminal') {
+        closedByTerminal = true
+        clearReconnectTimer()
+        handlers.onEvent(event)
+        handlers.onState?.('closed')
+        es.close()
+        return
+      }
+      handlers.onEvent(event)
+    } catch (err) {
+      // 单帧解析失败：按缺陷上报（不静默丢步，§6.3 规格 4）
+      console.error('[sse] 事件帧解析失败', err, msg.data)
+    }
+  }
+
   function connect() {
     es = new EventSource(url)
 

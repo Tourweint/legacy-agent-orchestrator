@@ -23,6 +23,7 @@ import {
 } from '../api/client.js'
 import { openTaskStream } from '../api/sse.js'
 import { useSessionStore } from './session.js'
+import { useConversationsStore } from './conversations.js'
 
 export const PHASES = [
   { key: 'P1', name: '理解', hint: '把你的话解析成意图与槽位' },
@@ -45,6 +46,8 @@ function makeTurn(userText, index) {
     entriesBySeq: {},
     result: null,
     clarify: null,
+    // 用户主动取消（界面要如实说"已停止"而不是"没办成"）
+    cancelled: false,
     sseState: 'closed',
     reconnectAttempt: 0,
     reconnectDelay: 0,
@@ -107,9 +110,54 @@ export const useTaskStore = defineStore('task', {
       this.error = null
     },
 
-    // 兼容旧调用点（结果卡 / 对话面板的"再办一件"）
+    // 兼容旧调用点（对话面板的"再办一件"）
     _reset() {
       this.newConversation()
+    },
+
+    /** 当前会话的可留存快照（交给 conversations store 落 localStorage）。 */
+    snapshot() {
+      return {
+        id: this.conversationId,
+        owner: useSessionStore().user?.username ?? null,
+        turns: this.turns.map((t) => ({ ...t })),
+        updatedAt: Date.now(),
+      }
+    },
+
+    /**
+     * 把历史会话装回工作区（左栏切换时调用）。
+     * 恢复的轮次按**终态**处理：不再订阅事件流、不再允许追问——它们的事件与结论已经随快照回来了；
+     * 证据明细（entriesBySeq）不持久化，展开时按需重拉，拉不到就如实说"留痕已不在"。
+     */
+    restore(item) {
+      this._stream?.close()
+      this._stream = null
+      this.error = null
+      this.conversationId =
+        typeof item?.id === 'string' && item.id.startsWith('C-') ? item.id : null
+      this.turns = (item?.turns ?? []).map((t, i) => ({
+        id: t.id ?? `turn-restored-${i}`,
+        userMessages: [...(t.userMessages ?? [])],
+        taskId: t.taskId ?? null,
+        status:
+          t.status === 'running' || t.status === 'suspended' ? 'terminal' : (t.status ?? 'terminal'),
+        cancelled: t.cancelled === true,
+        events: [...(t.events ?? [])],
+        result: t.result ?? null,
+        entriesBySeq: {},
+        clarify: null,
+        sseState: 'closed',
+        reconnectAttempt: 0,
+        reconnectDelay: 0,
+      }))
+      this.activeTurnId = this.turns[this.turns.length - 1]?.id ?? null
+    },
+
+    /** 会话有进展就留档；还没拿到引擎会话 id 时不落（免得存一堆空壳）。 */
+    _persist() {
+      if (!this.conversationId) return
+      useConversationsStore().upsert(this.snapshot())
     },
 
     _newTurn(userText) {
@@ -124,6 +172,7 @@ export const useTaskStore = defineStore('task', {
       if (turn.events.some((e) => e.seq === event.seq)) return
       turn.events.push(event)
       turn.events.sort((a, b) => a.seq - b.seq)
+      this._persist()
     },
 
     async _openStream(turn) {
@@ -156,6 +205,7 @@ export const useTaskStore = defineStore('task', {
         turn.status = 'terminal'
       }
       await this.ensureEvidence(turn.taskId)
+      this._persist()
     },
 
     /** 证据条目按 seq 入库（TrajectoryItem 展开原始证据时调用；§6.3 规格 4）。 */
@@ -196,6 +246,7 @@ export const useTaskStore = defineStore('task', {
       }
       if (res.data?.conversationId) this.conversationId = res.data.conversationId
       turn.taskId = res.data.taskId
+      this._persist() // 会话此刻才拿到引擎 id —— 从这一句开始才值得留档
       await this._openStream(turn)
       this._refreshWhileRunning(turn)
     },
@@ -232,6 +283,7 @@ export const useTaskStore = defineStore('task', {
       if (!turn?.taskId) return
       const res = await apiCancel(turn.taskId)
       if (res.code === 0) {
+        turn.cancelled = true
         turn.status = 'terminal'
         turn.result = res.data
         turn.clarify = null

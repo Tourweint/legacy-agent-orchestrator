@@ -339,7 +339,7 @@ export class RunEngine {
         const message = taskContext.intent.successMessage
           ? `${taskContext.intent.successMessage}（记录 #${recordId ?? '—'}${effect?.slotText ? `，${effect.slotText}` : ''}）`
           : item
-            ? `已为您办妥：${item.label ?? ''}（预约 #${item.recordId}，${item.slotText ?? ''}）${taskContext.outcome?.exempt?.length ? '（未能确认是否重复）' : ''}`
+            ? `已为您办妥：${item.label ?? ''}（预约 #${item.recordId}，${item.slotText ?? ''}）${taskContext.outcome?.exempt?.length ? '（未能确认是否重复）' : ''}${this.#degradeNote(taskContext)}`
             : `已为您处理（记录 #${recordId ?? '—'}）。`
         taskContext.outcome = { message, recordId }
         machine.fire('JUDGE_SUCCESS')
@@ -455,6 +455,20 @@ export class RunEngine {
       taskContext.outcome = { message: `撤销查证未能收敛：${v.summary}。需人工介入。` }
       machine.fire('VERIFY_INCONCLUSIVE')
     }
+  }
+
+  /**
+   * 发生过换教室时，把"为什么换了"写进结论。
+   * 理由（I4）：结论只说"已为您办妥：数智楼 222"时，用户会以为系统听错了自己说的教室——
+   * 而真相是"123 该时段不可用，已按同楼栋、不降容量的规则换了"。可解释性不是加分项，是必须项。
+   */
+  #degradeNote(taskContext) {
+    if (!taskContext.degradeRounds || !taskContext.originalClassroom) return ''
+    const from = taskContext.originalClassroom
+    const to = taskContext.currentTarget ?? {}
+    if (from.classroomId == null || from.classroomId === to.classroomId) return ''
+    const label = (c) => `${c.building ?? ''} ${c.roomNumber ?? ''}`.trim()
+    return `（原教室 ${label(from)} 在该时段不可用，已按同楼栋优先、不降容量的规则换到 ${label(to)}）`
   }
 
   // ── 降级（DEGRADING）：原教室即基准（同楼栋、不降容量），每轮一个候选、事实从零重取（J6）──

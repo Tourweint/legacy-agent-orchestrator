@@ -175,6 +175,7 @@ function makeChatRunner(world, llmResponses) {
         ])
       case '/classrooms/4/reserved_seats':
       case '/classrooms/5/reserved_seats':
+      case '/classrooms/6/reserved_seats':
         // C12：默认"这个时段没人占座"；用例可传 reservedSeatIds 造"座位已被占"的场景
         return ok(world.reservedSeatIds ?? [])
       case '/admin/reservations': return ok(world.adminRows ?? [])
@@ -440,6 +441,29 @@ const seatSlots = { classroomName: '数智楼123', seatNumber: 'A3', datePhrase:
 const seatOut = (over = {}) => [
   { intent: 'borrow-seat', slots: { ...seatSlots, ...over }, confidence: 0.9, outOfDomain: false },
 ]
+test('降级换教室：结论必须说明"为什么换了"（I4：可解释性不是加分项）', async () => {
+  const { outcome } = await chat(
+    // 数智楼123 被他人长期占用（宽时段，保证与"明天下午"重叠）→ 触发换教室
+    { adminRows: [conflictRow()] },
+    [
+      {
+        intent: 'borrow-classroom',
+        slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午' },
+        confidence: 0.9,
+        outOfDomain: false,
+      },
+    ],
+    '帮我借明天下午数智楼123',
+  )
+  assert.equal(outcome.result.terminal, 'DONE')
+  assert.match(outcome.result.conclusion, /数智楼 222/, '换到哪间要出现在结论里')
+  assert.match(
+    outcome.result.conclusion,
+    /原教室 数智楼 123 在该时段不可用/,
+    '还要说清为什么换了——否则用户以为系统听错了自己说的教室',
+  )
+})
+
 const seatSubmits = (gateway) => gateway.transport.calls.filter((c) => c.path === '/reservations/seats')
 
 test('C12 占座：学生一句话占座 —— 座位号解析成座位 id 后提交，且只提交一次', async () => {

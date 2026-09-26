@@ -11,7 +11,16 @@ const SUSPENDED_TTL_MS = 60 * 60 * 1000 // 挂起任务保留 1 小时（追问�
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000 // 每 5 分钟清理一次
 
 export class TaskStore {
-  constructor({ maxTasks = MAX_TASKS, terminalTtlMs = TERMINAL_TTL_MS, suspendedTtlMs = SUSPENDED_TTL_MS } = {}) {
+  constructor({
+    maxTasks = MAX_TASKS,
+    terminalTtlMs = TERMINAL_TTL_MS,
+    suspendedTtlMs = SUSPENDED_TTL_MS,
+    interfaceNames = {},
+    propositionNames = {},
+  } = {}) {
+    // 事件文案用的名称表（唯一真相源在配置里，见 event-stream.js）
+    this.interfaceNames = interfaceNames
+    this.propositionNames = propositionNames
     this.stream = new EventStream()
     this.tasks = new Map() // taskId → { taskId, status, result, owner, entries(), createdAt, completedAt }
     this.maxTasks = maxTasks
@@ -48,7 +57,12 @@ export class TaskStore {
     this.tasks.set(taskId, task)
     // 同源推送：证据链每落一条，立即映射为事件发布给订阅者
     chain.onAppend((entry) => {
-      this.stream.publish(mapEntryToEvent(entry))
+      this.stream.publish(
+        mapEntryToEvent(entry, {
+          interfaceNames: this.interfaceNames,
+          propositionNames: this.propositionNames,
+        }),
+      )
     })
     return task
   }

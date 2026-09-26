@@ -23,7 +23,12 @@ import { JudgmentEngine } from '../judgment/judgment-engine.js'
 import { TaskRunner } from '../orchestration/task-runner.js'
 import { TaskStore } from './task-store.js'
 import { ConversationStore } from './conversation-store.js'
-import { mapEntryToEvent, sseFrame } from './event-stream.js'
+import {
+  mapEntryToEvent,
+  sseFrame,
+  buildInterfaceNames,
+  buildPropositionNames,
+} from './event-stream.js'
 import { resolveSession, handleAuthRoute, AUTH_ERROR_CODES } from './auth-endpoints.js'
 
 // 错误码（登记于对外接口清单；形状校验错误在这里，可办性判断在判定层）
@@ -156,7 +161,11 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
   const sessionConstants = configStore.getConstants().session
   // 共享装配（构造期一次）：适配器与身份池跨任务复用；证据链按任务独立
   const sharedGateway = new ContactGateway({ configStore, transport, identityPool, userTokenStore, adapters: adapterImpl })
-  const taskStore = new TaskStore()
+  // 事件文案用的两张名称表：接口名从接口注册表派生、命题名从术语对照表派生
+  //（都取自配置，不在这里另维护映射，见 event-stream.js）
+  const interfaceNames = buildInterfaceNames(configStore.registry)
+  const propositionNames = buildPropositionNames(configStore.getGlossary())
+  const taskStore = new TaskStore({ interfaceNames, propositionNames })
   // 会话记忆（跨轮）：一轮 chat 任务只承载一轮对话，任务落终态后运行栈即销毁——
   // 会话记忆负责把"上一句说了哪间教室/哪个时段"带进下一轮（见 conversation-store.js）
   const conversationStore = new ConversationStore()
@@ -541,7 +550,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         // 再重放快照点及之前的历史条目
         for (const entry of entriesSnapshot) {
           if (streamEnded) break
-          const event = mapEntryToEvent(entry)
+          const event = mapEntryToEvent(entry, { interfaceNames, propositionNames })
           writeEvent(event)
         }
         // 终态任务：重放完毕后关闭（终态事件已在重放中写入）

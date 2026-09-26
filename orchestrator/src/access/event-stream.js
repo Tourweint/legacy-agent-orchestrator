@@ -18,6 +18,55 @@ const FACT_NAMES = {
   F6: '维修窗口',
 }
 
+/**
+ * 接口的业务语义短名：**取自接口注册表的 `purpose` 首段**（"——"/"（" 之前）。
+ * 为什么不另维护一份 id → 名字的映射：两份映射必然漂移（前端 `display-names.js` 里
+ * 曾经就有这么一份，删右栏时露出的"call 事件只有 ok"正是它存在的理由消失后的后果）。
+ * 例："教室详情——把人读名解析成系统 id（实体消解），并读取 status（F1）" → "教室详情"
+ */
+export function shortPurpose(purpose) {
+  if (typeof purpose !== 'string' || !purpose.trim()) return ''
+  return purpose.split(/——|—|\(|（/)[0].trim()
+}
+
+/** 从接口注册表派生 id → 业务语义短名（注册表是唯一真相源）。 */
+export function buildInterfaceNames(registry) {
+  const out = {}
+  for (const item of registry?.interfaces ?? []) {
+    const label = shortPurpose(item?.purpose)
+    if (item?.id && label) out[item.id] = label
+  }
+  return out
+}
+
+/**
+ * 从术语对照表派生 命题 id → 人话名。
+ * 引擎配置（config/glossary.yaml）是唯一真相源——界面侧的 `GET /api/meta/glossary` 与
+ * 事件文案用的是同一份，因此不会出现"界面说'这个时段是空的'、事件里写 P-SLOT-FREE"。
+ */
+export function buildPropositionNames(glossary) {
+  const out = {}
+  for (const [id, name] of Object.entries(glossary?.propositions ?? {})) {
+    if (id && typeof name === 'string') out[id] = name
+  }
+  return out
+}
+
+// 判定结论的人话（枚举值直接给用户看等于没说）
+const PROPOSITION_OUTCOME_TEXT = {
+  SATISFIED: '成立',
+  VIOLATED: '不成立',
+  UNCONFIRMABLE: '无法确认',
+  NOT_APPLICABLE: '不适用',
+}
+
+/** 调用结果的附加说明：引擎成功时常见返回就是 "ok"，那就没必要念出来。 */
+function callDetailText(summary) {
+  const text = typeof summary === 'string' ? summary.trim() : ''
+  if (!text || /^(ok|success|已完成)$/i.test(text)) return ''
+  return ` · ${text}`
+}
+
 const STATUS_BY_FACT_OUTCOME = {
   OBTAINED: 'done',
   UNOBTAINABLE: 'unavailable',
@@ -52,8 +101,16 @@ function decisionStatus(outcome) {
 
 /**
  * 证据条目 → 事件消息。一一对应：每条证据恰产出一条事件（§6.1 逐条一致）。
+ * @param {object} entry 证据条目
+ * @param {object} [names]
+ * @param {object} [names.factNames]        事实编号 → 人话名（默认内置表）
+ * @param {object} [names.interfaceNames]   接口 id → 业务语义短名（buildInterfaceNames 从注册表派生）
+ * @param {object} [names.propositionNames] 命题 id → 人话名（buildPropositionNames 从术语对照表派生）
  */
-export function mapEntryToEvent(entry, factNames = FACT_NAMES) {
+export function mapEntryToEvent(
+  entry,
+  { factNames = FACT_NAMES, interfaceNames = {}, propositionNames = {} } = {},
+) {
   const base = {
     seq: entry.seq,
     taskId: entry.taskId,
@@ -73,11 +130,17 @@ export function mapEntryToEvent(entry, factNames = FACT_NAMES) {
     }
   }
   if (entry.action.startsWith('judge:')) {
+    const outcome = entry.conclusion?.outcome
+    // 命题人话名来自术语对照表：事件文案与界面（GET /api/meta/glossary）同源，不会各说各话
+    const label = propositionNames[entry.action.slice('judge:'.length)] ?? '这一项条件'
+    const verdictText = PROPOSITION_OUTCOME_TEXT[outcome] ?? '已判定'
+    // 证据里若还带了额外说明（不是枚举复述），括注出来
+    const extra = summary && summary !== outcome ? `（${summary}）` : ''
     return {
       ...base,
       type: 'proposition-judged',
-      status: STATUS_BY_JUDGE_OUTCOME[entry.conclusion?.outcome] ?? 'done',
-      text: summary || entry.conclusion?.outcome || '',
+      status: STATUS_BY_JUDGE_OUTCOME[outcome] ?? 'done',
+      text: `${label} · ${verdictText}${extra}`,
     }
   }
   if (entry.action.startsWith('contact:')) {
@@ -86,11 +149,15 @@ export function mapEntryToEvent(entry, factNames = FACT_NAMES) {
     if (verdict === 'UNKNOWN') {
       return { ...base, type: 'uncertain', status: 'uncertain', text: '结果待确认，正在核对……' }
     }
+    // 事件自带业务语义名（"提交教室预约 · 系统拒绝了这次提交"）——
+    // 界面（对话里的折叠块、明细行）因此不必各自再去查证据补名字，
+    // 也不会把内部接口标识漏到用户面前（映射缺失时给中性说法，不塞 id）。
+    const label = interfaceNames[entry.action.slice('contact:'.length)] ?? '与业务系统交互'
     return {
       ...base,
       type: 'call',
       status: STATUS_BY_VERDICT[verdict] ?? 'done',
-      text: summary,
+      text: `${label}${callDetailText(summary)}`,
     }
   }
   if (entry.action.startsWith('ask:')) {

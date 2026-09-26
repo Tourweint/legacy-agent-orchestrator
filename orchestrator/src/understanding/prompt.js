@@ -53,6 +53,12 @@ ${intentBlock}
    涉及金钱/额度（充值、缴费）、用户管理（注册、改密码）、签到或用量上报、
    与校园教室借用无关的任何请求。
 6. clarifyQuestion 用一句自然的中文向用户追问缺失的信息；信息齐备时留空或不输出。
+7. 用户说"那…""改成…""换成…""还是…吧"这类**接续语**时，指的是**上一轮那件事**（看上面历史里
+   最后一条助手摘要的 intent），把新说的日期/时间当作它的补充或修改。
+   上一轮已经说清的信息（教室、日期…）要**沿用并写进本次 slots**——它已经由用户说过，不是"猜"；
+   只有上一轮也没说过的才留空。
+   ❌ 反例：历史里上一轮在借"数智楼123"，用户说"那改成后天上午" → 不要理解成"查询我的预约"；
+      也不要把 classroomName 留空再去问"哪间教室"（应该沿用 数智楼123）。
 
 # 输出格式
 只输出一个 JSON 对象，不要输出任何其他文字：
@@ -98,6 +104,21 @@ export function fewShotExamples() {
         slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午两点到四点' },
         confidence: 0.93,
         outOfDomain: false,
+      }),
+    },
+    {
+      role: 'user',
+      content: '那改成后天上午',
+    },
+    {
+      role: 'assistant',
+      content: JSON.stringify({
+        // 接续语延续上一轮那件事（纪律 7）：仍是借教室，只改日期与时段，教室沿用上文
+        intent: 'borrow-classroom',
+        slots: { classroomName: '数智楼123', datePhrase: '后天', timeSegment: '上午' },
+        confidence: 0.9,
+        outOfDomain: false,
+        reasoning: '"那改成…"接的是上一轮的借教室',
       }),
     },
     {

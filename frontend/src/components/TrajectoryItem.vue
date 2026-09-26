@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useTaskStore } from '../stores/task.js'
 import { useGlossaryStore } from '../stores/glossary.js'
+import { identityName } from '../constants/display-names.js'
 import { IconCheck, IconX, IconFlag, IconAlert, IconSpinner } from '../icons/index.js'
 
 const props = defineProps({ event: { type: Object, required: true } })
@@ -9,25 +10,8 @@ const store = useTaskStore()
 const glossary = useGlossaryStore()
 const expanded = ref(false)
 
-// 身份的中文展示（§2.2：身份必须可见；不出现接口 URL/参数名）
-const IDENTITY_NAMES = { ADMIN: '管理端身份', TEACHER: '教师身份', STUDENT: '学生身份' }
-
-// 接口的业务语义名（展示用；参数名/URL 禁止出现）
-const INTERFACE_NAMES = {
-  'auth.login': '登录换取凭证',
-  'edu.classroom.detail': '查询教室详情',
-  'edu.classroom.available': '按楼栋筛选候选教室',
-  'edu.classroom.seats': '查询座位布局',
-  'edu.classroom.reservedSeats': '查询该时段座位占用',
-  'logi.maintenance.list': '查询维修窗口',
-  'edu.reservation.classroom.create': '提交教室预约',
-  'edu.reservation.seat.create': '提交座位预约',
-  'edu.reservation.mine': '查询我的预约',
-  'edu.reservation.cancel': '撤销预约',
-  'logi.reservation.list': '查询全量预约（跨身份）',
-  'logi.maintenance.create': '创建维修窗口（演示工具）',
-}
-
+// 接口业务语义名与身份显示名：与要点行、答案气泡**共用同一份**（constants/display-names.js）——
+// 它们原本长在这里，现在三个组件都要用，放一处才不会互相漂移。
 // 事实/命题/规则的人话名不在这里写死：唯一来源是引擎的术语对照表（stores/glossary.js），
 // 查不到时它原样返回编号——比在界面里维护第二份映射诚实。
 
@@ -36,17 +20,10 @@ const entry = computed(() => {
   return store.entriesBySeq[seq] ?? null
 })
 
-const identity = computed(() => {
-  const id = entry.value?.metadata?.identity
-  return id ? (IDENTITY_NAMES[id] ?? id) : null
-})
+const identity = computed(() => identityName(entry.value?.metadata?.identity))
 
-const callName = computed(() => {
-  const action = entry.value?.action ?? ''
-  return action.startsWith('contact:')
-    ? (INTERFACE_NAMES[action.slice('contact:'.length)] ?? action)
-    : null
-})
+// 接口的业务语义名不再在这里拼：事件流已把"提交教室预约 · 系统拒绝了这次提交"整句给到
+// （引擎从接口注册表派生，见 orchestrator/src/access/event-stream.js），界面直接用 event.text。
 
 // 依据芯片：说清"这条结论是凭什么下的"——用业务语义，不出现内部编号（零术语 P1-3）
 const basisChips = computed(() => {
@@ -63,13 +40,6 @@ const basisChips = computed(() => {
 })
 
 const injected = computed(() => entry.value?.metadata?.injected === true)
-
-function displayText(event) {
-  if (event.type === 'call' && callName.value) return `${callName.value} · ${event.text}`
-  if (event.type === 'fact-collected') return event.text
-  if (event.type === 'uncertain') return event.text
-  return event.text
-}
 
 function timeOf(event) {
   // 绝对时刻 → 展示层单向转本地（只取时分秒）
@@ -96,7 +66,7 @@ async function toggleExpand() {
         <IconFlag v-else-if="event.status === 'uncertain'" :size="12" class="pulse-icon" />
         <span v-else class="neutral">–</span>
       </span>
-      <span class="text" :title="event.text">{{ displayText(event) }}</span>
+      <span class="text" :title="event.text">{{ event.text }}</span>
       <span v-if="identity" class="chip identity">{{ identity }}</span>
       <span v-if="injected" class="chip injected" title="本次运行包含故障注入">
         <IconAlert :size="10" />

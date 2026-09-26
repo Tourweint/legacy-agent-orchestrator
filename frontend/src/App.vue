@@ -3,7 +3,7 @@
 // 进入时先问一次"我是谁"（会话可能还在），会话失效则退回登录页并给"人话"提示。
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ChatPane from './components/ChatPane.vue'
-import TrajectoryPane from './components/TrajectoryPane.vue'
+import ConversationList from './components/ConversationList.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import LoginView from './views/LoginView.vue'
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal.vue'
@@ -11,18 +11,29 @@ import { useTheme } from './composables/useTheme.js'
 import { useSessionStore } from './stores/session.js'
 import { useTaskStore } from './stores/task.js'
 import { useGlossaryStore } from './stores/glossary.js'
+import { useConversationsStore } from './stores/conversations.js'
 import { IconSpinner, IconFlag, IconCheck, IconX } from './icons/index.js'
 
 const session = useSessionStore()
 const glossary = useGlossaryStore()
+const conversations = useConversationsStore()
+
+// 左栏默认展开（切换对话方便）；收起只影响布局
+const sideCollapsed = ref(false)
 
 // 术语对照表随登录状态加载/清空（零术语纪律）：登录后拉一次，退出时清掉——
 // 换个人登录不该沿用上一个人的界面状态。
 watch(
   () => session.isLoggedIn,
   (loggedIn) => {
-    if (loggedIn) glossary.load()
-    else glossary.reset()
+    if (loggedIn) {
+      glossary.load()
+      // 会话列表按登录用户装载（同一浏览器换了人，不该看到上一个人的对话）
+      conversations.load(session.user?.username ?? null)
+    } else {
+      glossary.reset()
+      conversations.$reset() // 只清视图；磁盘上的记录按用户名隔离保留
+    }
   },
 )
 
@@ -167,9 +178,16 @@ onUnmounted(() => {
       正在确认登录状态…
     </main>
     <LoginView v-else-if="!session.isLoggedIn" />
-    <main v-else id="main-content" class="views" role="main" tabindex="-1">
+    <main
+      v-else
+      id="main-content"
+      class="views"
+      :class="{ 'side-collapsed': sideCollapsed }"
+      role="main"
+      tabindex="-1"
+    >
+      <ConversationList :collapsed="sideCollapsed" @toggle="sideCollapsed = !sideCollapsed" />
       <ChatPane />
-      <TrajectoryPane />
     </main>
 
     <KeyboardShortcutsModal :visible="showShortcuts" @close="showShortcuts = false" />
@@ -178,7 +196,7 @@ onUnmounted(() => {
 
 <style scoped>
 .shell {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: var(--space-5) var(--space-5) var(--space-6);
 }
@@ -376,16 +394,21 @@ onUnmounted(() => {
 
 .views {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
-  gap: var(--space-5);
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--space-4);
   align-items: start;
 }
 
-/* 平板：减小对话区宽度 */
+/* 左栏收起：只留一条窄边与展开按钮 */
+.views.side-collapsed {
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+/* 平板：左栏收窄，给对话让位 */
 @media (max-width: 1024px) {
   .views {
-    grid-template-columns: 320px minmax(0, 1fr);
-    gap: var(--space-4);
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: var(--space-3);
   }
 }
 
