@@ -12,7 +12,7 @@ import { useSessionStore } from './stores/session.js'
 import { useTaskStore } from './stores/task.js'
 import { useGlossaryStore } from './stores/glossary.js'
 import { useConversationsStore } from './stores/conversations.js'
-import { IconCheck, IconSidebar } from './icons/index.js'
+import { IconSidebar } from './icons/index.js'
 
 const session = useSessionStore()
 const glossary = useGlossaryStore()
@@ -119,7 +119,7 @@ onUnmounted(() => {
         >
           <IconSidebar :size="17" />
         </button>
-        <span class="brand-mark" aria-hidden="true"><IconCheck :size="13" /></span>
+        <img class="brand-mark" src="/brand-icon.png" alt="" aria-hidden="true" />
         <h1 class="brand">预约教室助手</h1>
       </div>
 
@@ -259,15 +259,14 @@ onUnmounted(() => {
   line-height: 1;
 }
 
+/* 品牌图标（2026-09-27）：AI 生成的"预约教室助手"徽章图（frontend/public/brand-icon.png，
+   透明底圆角徽章），不再是渐变底 + 对勾符号的组合 */
 .brand-mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 24px;
   height: 24px;
   border-radius: 8px;
-  background: var(--accent-gradient);
-  color: #ffffff;
-  box-shadow: var(--shadow-glow-soft);
+  object-fit: contain;
   flex-shrink: 0;
 }
 

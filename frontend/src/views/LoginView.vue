@@ -5,7 +5,6 @@
 //   · 界面上不出现任何接口术语；提示语全部是人话（零术语纪律）
 import { ref } from 'vue'
 import { useSessionStore } from '../stores/session.js'
-import { IconCheck } from '../icons/index.js'
 
 const session = useSessionStore()
 const username = ref('')
@@ -25,7 +24,7 @@ async function submit() {
   <div class="login-wrap">
     <form class="card" @submit.prevent="submit">
       <div class="brand-row">
-        <span class="brand-mark" aria-hidden="true"><IconCheck :size="14" /></span>
+        <img class="brand-mark" src="/brand-icon.png" alt="" aria-hidden="true" />
         <div class="brand">预约教室助手</div>
       </div>
       <div class="sub">用你在校园系统里的账号登录——我们不另建账号</div>
@@ -86,14 +85,11 @@ async function submit() {
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: var(--accent-gradient);
-  color: #ffffff;
-  box-shadow: var(--shadow-glow-soft);
+  object-fit: contain;
   flex-shrink: 0;
 }
 
