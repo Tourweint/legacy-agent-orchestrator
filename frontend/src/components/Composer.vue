@@ -91,8 +91,11 @@ function onKeydown(e) {
 <style scoped>
 /* 输入条做成一个整体 dock：白底圆角容器，输入框去边框融入；聚焦时整体发光。
    2026-09-27 单实例改造：hero ↔ dock 是同一个元素，位置由 ChatPane 的 .composer-host
-   控制（top/width），这里只过渡**形态**——padding/圆角/阴影/输入行高/按钮尺寸
-   平滑跟随位置一起变化（300ms 与 host 的 top/width 同步），不出现"边移动边跳变"。 */
+   控制（top），这里只过渡**形态**——边框/阴影/内边距/圆角平滑跟随位置变化
+   （300ms 与 host 的 top 同步），不出现"边移动边跳变"。
+   2026-09-27 形态统一：hero 与 dock **不再有尺寸差异**（用户口径："开启对话之后
+   对话框不一般大、本来相同的事物变成不同了，非常奇怪"）——同 padding/圆角/
+   行高/按钮，只有位置不同。切换动画 = 纯位置移动 + 标题淡出。 */
 .composer {
   display: flex;
   align-items: center;
@@ -101,7 +104,9 @@ function onKeydown(e) {
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-medium);
   padding: 6px 6px 6px 12px;
-  box-shadow: var(--shadow-xs);
+  /* 阴影统一为上下对称的均匀淡影（用户口径：--shadow-xs/--shadow-md 纯下沉、
+     上边没阴影太淡、下边重；改四周均匀，dock 与 hero 同影） */
+  box-shadow: 0 0 18px rgba(16, 24, 40, 0.07);
   transition:
     border-color 300ms var(--ease-standard),
     box-shadow 300ms var(--ease-standard),
@@ -120,7 +125,8 @@ function onKeydown(e) {
   background: transparent;
   box-shadow: none;
   /* 2026-09-27：文字不垂直居中的根因——垂直 padding 8px + 默认行高(~19px) 溢出 16px 内容区，
-     文字上 8px / 下 4.8px 不均。改 padding: 0 + 显式 line-height，文字必然垂直居中。 */
+     文字上 8px / 下 4.8px 不均。改 padding: 0 + 显式 line-height，文字必然垂直居中。
+     行高 32px 为统一值（hero 不再 36px，与 dock 一致）。 */
   padding: 0 4px;
   line-height: 32px;
   transition:
@@ -134,13 +140,14 @@ function onKeydown(e) {
 
 /* 按钮统一纯图标（2026-09-27 用户口径："发送"两个字取消，只留小飞机 SVG）：
    dock 与 hero 都不显示文字，语义靠 aria-label/title 与 placeholder 承担。
-   dock 按钮因此收窄成一个紧凑色块；**dock 与 hero 都做成圆形**（用户口径：
-   第一次对话是圆的、第二次变方的不行——形状必须一致）。 */
+   **尺寸统一 32×32 圆**（用户口径："右边这个发送按钮太大了"——hero 不再 40×40）。 */
 .composer .btn {
   flex-shrink: 0;
-  border-radius: 50%;
-  padding: 8px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   justify-content: center;
+  border-radius: 50%;
   transition:
     width 300ms var(--ease-standard),
     height 300ms var(--ease-standard),
@@ -151,39 +158,10 @@ function onKeydown(e) {
   display: none;
 }
 
-/* 空态中央宽输入框（hero）：不扁平——圆角更大、内边距更厚、输入字号更大。
-   ⚠️ 2026-09-27 单实例改造：**宽度不再由本组件控制**（width: 100% 撑满父层），
-   改由 ChatPane 的 .composer-host 控制（空态 min(64vw,780px) / 对话态 min(820px,…)），
-   这样 hero ↔ dock 切换时宽度能随 top 一起过渡，形态完全跟随位置。
-   阴影用**上下对称的均匀淡影**（用户口径：--shadow-md 是纯下沉、上边没阴影太淡，
-   下边重；改四周均匀），边框自带 1px 细线，阴影只负责"浮起"。 */
-.composer.hero {
-  margin: 0;
-  width: 100%;
-  max-width: 100%;
-  padding: 14px 10px 14px 18px;
-  border-radius: var(--radius-lg);
-  box-shadow: 0 0 18px rgba(16, 24, 40, 0.07);
-}
-
-.composer.hero .input {
-  padding: 0 6px;
-  line-height: 36px;
-  font-size: var(--text-base);
-}
-
-.composer.hero .btn {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  justify-content: center;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.composer.hero .btn svg {
-  width: 16px;
-  height: 16px;
+/* 图标尺寸统一 14px（hero 不再 16px，与 dock 一致） */
+.composer .btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -199,17 +177,6 @@ function onKeydown(e) {
 
   .composer .btn {
     width: 100%;
-  }
-
-  .composer.hero {
-    width: 100%;
-    padding: 12px 10px;
-  }
-
-  /* hero 的小圆按钮在窄屏不拉成整条：保持圆形、靠右下角 */
-  .composer.hero .btn {
-    width: 40px;
-    align-self: flex-end;
   }
 }
 </style>

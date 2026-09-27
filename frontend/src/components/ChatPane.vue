@@ -386,7 +386,8 @@ watch(() => store.activeTurnId, () => {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  top: calc(34vh + 86px);
+  /* 输入条统一 46px 高（hero 与 dock 同形态）→ chips 在输入条下方 16px */
+  top: calc(34vh + 62px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -405,20 +406,20 @@ watch(() => store.activeTurnId, () => {
   left: 50%;
   transform: translateX(-50%);
   top: 34vh;
-  width: min(64vw, 780px);
+  /* 宽度统一：hero 与 dock 同一宽度（min(820px, 视口-48px) 自适应），
+     切换时不再有宽度变化（用户口径："开启对话后对话框不一般大，非常奇怪"）。
+     切换动画 = 纯位置移动（top 300ms）+ 标题淡出。 */
+  width: min(820px, calc(100% - 48px));
   display: flex;
   flex-direction: column;
   --stop-h: 0px;
-  transition:
-    top 300ms var(--ease-standard),
-    width 300ms var(--ease-standard);
+  transition: top 300ms var(--ease-standard);
   z-index: 2;
 }
 
 .chat.has-turns .composer-host {
   /* dock 位置：底部留白 18px；出现停止按钮时整体上移 --stop-h（约 34px） */
   top: calc(100% - 62px - var(--stop-h));
-  width: min(820px, calc(100% - 48px));
 }
 
 .composer-host.has-stop {
