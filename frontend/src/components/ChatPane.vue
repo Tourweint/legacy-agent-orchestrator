@@ -362,7 +362,10 @@ watch(() => store.activeTurnId, () => {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  top: calc(34vh - 38px);
+  /* 2026-09-27 修复：h2 默认 margin 会把标题文字下推 ~18px、文字底边压进输入条
+     （实测文字 bottom 367 > 输入条 top 356，被盖住 11px——"输入条把标题挡住了"）。
+     重置 margin 后元素高 = 33px，-50px 让文字底边到输入条顶净距约 17px。 */
+  top: calc(34vh - 50px);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -377,7 +380,9 @@ watch(() => store.activeTurnId, () => {
 }
 
 .hero-title {
+  margin: 0; /* h2 默认上下 margin 会破坏 flex 垂直对齐、把文字压进输入条 */
   font-size: var(--text-xl);
+  line-height: 33px;
   font-weight: var(--weight-bold);
   color: var(--text);
 }
