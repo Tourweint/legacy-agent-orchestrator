@@ -10,6 +10,7 @@
 // 之后的调整记录）。
 
 import { computed } from 'vue'
+import { IconCheck, IconX } from '../icons/index.js'
 
 const props = defineProps({
   turn: { type: Object, required: true },
@@ -28,6 +29,17 @@ const kind = computed(() => {
   if (t === 'DONE') return 'done'
   if (t === 'UNRESOLVED') return 'unsure'
   return 'failed'
+})
+
+/**
+ * 状态判据图标（2026-09-27 回归，但只标在结论上、不标"思考"）：
+ * 对勾 = 办成了（done）；错号 = 没办成（failed 红 / unsure 橙）；
+ * cancelled（用户主动停止）不加图标，文字保持浅灰。
+ */
+const verdict = computed(() => {
+  if (kind.value === 'done') return 'ok'
+  if (kind.value === 'failed' || kind.value === 'unsure') return 'bad'
+  return null
 })
 
 const conclusion = computed(() => result.value?.conclusion ?? terminalEvent.value?.text ?? '')
@@ -64,9 +76,18 @@ const isItem = (line) => /^\d+\.\s/.test(line)
 
 <template>
   <div v-if="kind" class="answer" :class="'is-' + kind">
-    <template v-for="(line, i) in paragraphs" :key="i">
-      <p class="text" :class="{ item: isItem(line) }">{{ line }}</p>
-    </template>
+    <p
+      v-for="(line, i) in paragraphs"
+      :key="i"
+      class="text"
+      :class="{ item: isItem(line), lead: i === 0 && verdict }"
+    >
+      <span v-if="i === 0 && verdict" class="verdict" aria-hidden="true">
+        <IconCheck v-if="verdict === 'ok'" :size="18" />
+        <IconX v-else :size="18" />
+      </span>
+      {{ line }}
+    </p>
   </div>
 </template>
 
@@ -82,10 +103,11 @@ const isItem = (line) => /^\d+\.\s/.test(line)
 }
 
 /* 大字答案：这是用户要的那句话，值得用整个卡片的视觉重心去承载。
-   结构化（2026-09-27）：多行结论按行渲染为块级段落，列表行（`N. `）悬挂缩进。 */
+   2026-09-27（第三次）：字号 22px → 18px（用户口径"稍微调小一点，不必回到原来那么小"）；
+   结论首行带状态图标（对勾/错号），列表行（`N. `）悬挂缩进。 */
 .text {
   margin: 0.15em 0 0;
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
   font-weight: var(--weight-medium);
   line-height: 1.55;
   color: var(--text);
@@ -94,6 +116,32 @@ const isItem = (line) => /^\d+\.\s/.test(line)
 
 .text:first-child {
   margin-top: 0;
+}
+
+/* 首行 = 总起句 + 状态图标：图标垂直对齐首行，不压后续行 */
+.text.lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.verdict {
+  display: inline-grid;
+  place-items: center;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.is-done .verdict {
+  color: var(--success-500);
+}
+
+.is-failed .verdict {
+  color: var(--danger-500);
+}
+
+.is-unsure .verdict {
+  color: var(--warning-500);
 }
 
 .text.item {
@@ -107,7 +155,7 @@ const isItem = (line) => /^\d+\.\s/.test(line)
   }
 
   .text {
-    font-size: var(--text-lg);
+    font-size: var(--text-md);
   }
 }
 </style>
