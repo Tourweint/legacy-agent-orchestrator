@@ -71,8 +71,9 @@ const isItem = (line) => /^\d+\.\s/.test(line)
 </template>
 
 <style scoped>
+/* 结论紧贴上方"思考"（思考块已用负 margin 抵消 flex gap，这里顶部不再加距） */
 .answer {
-  margin: var(--space-2) 0 var(--space-2);
+  margin: 0 0 var(--space-2);
   padding: 0;
 }
 
