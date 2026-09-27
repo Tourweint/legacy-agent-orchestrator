@@ -78,9 +78,41 @@ function onKeydown(e) {
 </template>
 
 <style scoped>
+/* 输入条做成一个整体 dock：白底圆角容器，输入框去边框融入；聚焦时整体发光 */
 .composer {
   display: flex;
+  align-items: center;
   gap: var(--space-2);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-medium);
+  padding: 6px 6px 6px 12px;
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+.composer:focus-within {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px var(--accent-100), var(--shadow-glow-soft);
+}
+
+.composer .input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: var(--space-2) 4px;
+}
+
+.composer .input:focus {
+  box-shadow: none;
+}
+
+.composer .btn {
+  flex-shrink: 0;
+  border-radius: var(--radius-small);
 }
 
 .kb-hints {

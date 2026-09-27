@@ -67,6 +67,16 @@ export function loginOk(req) {
   return { kind: 'response', httpStatus: 200, json: JSON.parse(bodyText), bodyText }
 }
 
+/**
+ * 登录被拒的原始传输响应（`code` 是存量系统的**真实业务码**）。
+ * 实测口径（2026-09-27）：密码错 = HTTP 200 + 业务码 401；Redis 缺席 = 业务码 500——
+ * 两者都被引擎的登录端点收成 `401 + 4013`，差别只应在消息里体现。
+ */
+export function loginRejected(businessCode, message = '业务失败') {
+  const bodyText = JSON.stringify({ code: businessCode, message, data: null })
+  return { kind: 'response', httpStatus: 200, json: JSON.parse(bodyText), bodyText }
+}
+
 /** 续期：刷新令牌是轮换的（旧的一次性作废）——与存量系统源码行为一致。 */
 export function refreshOk(req) {
   const refreshToken = req.body?.refreshToken ?? ''
@@ -91,10 +101,11 @@ export function refreshOk(req) {
  * @param {object|null} [options.user] 直接指定登录用户画像（覆盖 role）；
  *        显式传 null = **没有登录用户的网关**（用于验证"无身份即本地报错"这类负向行为）
  */
-export function makeGateway(handler, { now, role = 'TEACHER', user } = {}) {
+export function makeGateway(handler, { now, role = 'TEACHER', user, auth } = {}) {
   const store = new ConfigStore()
   const transport = new FakeTransport((req) => {
-    if (req.path === '/auth/login') return loginOk(req)
+    // auth 可覆盖登录的原始响应——用于验收"登录失败分流"（业务码 401 / 500）这类负向路径
+    if (req.path === '/auth/login') return auth ? auth(req) : loginOk(req)
     if (req.path === '/auth/refresh') return refreshOk(req)
     return handler(req)
   })

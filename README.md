@@ -98,21 +98,27 @@ orchestrator/        编排引擎（阶段 0–8 已完成 + P1 安全修复，`
 mock-legacy/         被测存量系统（第三方开源项目，零侵入，已可运行）
 frontend/            对话前端（阶段 7 已完成 + 全方位系统性优化，Vue 3 三视图，npm run dev → 5173）
 deploy/              部署脚本与配置（存量系统启动/复位；演示检查/场景预置/清理/注入器）
-start-all.bat        Windows 一键启动（存量系统 8080 + 引擎 8090 + 前端 5173）
+start-all.bat        Windows 一键启动（Redis 6379 + 存量系统 8080 + 引擎 8090 + 前端 5173 + 存量界面 5174）
 ```
 
 ## 一键启动（Windows）
 
-前置：Node 20+、Maven、**JDK 17**、MariaDB/MySQL（库 `classroom`）、Redis 6379。
+前置：Node 20+、Maven、**JDK 17**、MariaDB/MySQL（库 `classroom`）。Redis 不用预装流程——脚本会自己拉起（见下）。
 
 ```bat
-start-all.bat            :: 启动存量系统 8080 + 编排引擎 8090 + 前端 5173（双击亦可）
+start-all.bat            :: 启动全部：Redis 6379 + 存量系统 8080 + 引擎 8090 + 前端 5173 + 存量界面 5174（双击亦可）
+start-all.bat redis      :: 只启动 Redis（6379）
+start-all.bat legacy     :: 只启动存量系统后端（8080）
+start-all.bat engine     :: 只启动编排引擎（8090）
+start-all.bat web        :: 只启动对话前端（5173）
+start-all.bat legacyui   :: 只启动存量系统自带界面（5174，双屏对照的右屏）
 start-all.bat deps       :: 只做前置检查（Node/Maven/JDK17/Redis/MariaDB/端口占用）
-start-all.bat engine     :: 只启动编排引擎
 start-all.bat dry        :: 只打印将要执行的命令，不启动
 ```
 
-三个进程各开一个独立窗口，关窗即停。可选配置：`deploy/config/legacy.env`（存量系统，模板见 `legacy.env.example`）与 `deploy/config/orchestrator.env`（引擎凭证）——存在即载入，缺失则用内置的演示默认值。脚本不设置 `ORCH_CHAOS_INJECT`（**混沌默认撤防**）。
+**Redis 自动拉起**：`all` / `legacy` / `legacyui` / `redis` 四种模式会先确保 6379 就绪——已在运行则跳过，未运行则自动定位 `redis-server` 并拉起（数据目录 `deploy/data/redis`，AOF 持久化，与 `deploy/scripts/start-redis.sh` 同口径）；定位顺序是环境变量 `REDIS_SERVER` → `PATH` → scoop → 常见安装路径。存量系统的登录会话、刷新令牌、设备会话全部存在 Redis 里，**缺它时登录请求会挂住超时、必然登不进去**——因此找不到 `redis-server` 时脚本会明确中止并指名，不静默跳过。（引擎侧的登录失败提示已按错误类型分流：账号密码错与服务端故障分开说，不再把后台故障说成"账号或密码不正确"。）
+
+各进程各开一个独立窗口，关窗即停。可选配置：`deploy/config/legacy.env`（存量系统，模板见 `legacy.env.example`）与 `deploy/config/orchestrator.env`（引擎凭证）——存在即载入，缺失则用内置的演示默认值。脚本不设置 `ORCH_CHAOS_INJECT`（**混沌默认撤防**）。
 
 ## 运行被测存量系统
 

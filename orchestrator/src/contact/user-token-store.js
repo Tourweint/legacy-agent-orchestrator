@@ -200,12 +200,21 @@ export class UserTokenStore {
     })
     if (result.kind !== 'response') {
       const detail = result.errorMessage ? `（${result.errorMessage}）` : ''
-      throw new ContactError(`凭证操作 ${interfaceId} 传输失败：${result.kind}${detail}`)
+      const err = new ContactError(`凭证操作 ${interfaceId} 传输失败：${result.kind}${detail}`)
+      // 结构化标记（2026-09-27）：接入层据此把"链路故障"与"账号密码错"分开说，
+      // 不必去解析错误消息文本（解析文本是脆的，改一个字就失效）
+      err.transportKind = result.kind
+      throw err
     }
     const signals = this.adapters.extractSignals(result)
     if (signals.httpStatus === 401 || signals.businessCode !== 200) {
       // 不把用户口令或令牌写进错误消息
-      throw new ContactError(`凭证操作 ${interfaceId} 被拒：HTTP ${signals.httpStatus} / 业务码 ${signals.businessCode ?? '缺失'}`)
+      const err = new ContactError(`凭证操作 ${interfaceId} 被拒：HTTP ${signals.httpStatus} / 业务码 ${signals.businessCode ?? '缺失'}`)
+      // 结构化标记（2026-09-27）：真实业务码——登录端点凭它区分"用户或密码错误"
+      // （存量实测：HTTP 200 + 业务码 401）与"服务端故障"（如 Redis 缺席时的业务码 500）
+      err.httpStatus = signals.httpStatus
+      err.businessCode = signals.businessCode
+      throw err
     }
     return signals
   }

@@ -8,7 +8,7 @@ import ErrorState from './ErrorState.vue'
 import Composer from './Composer.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import AnswerBubble from './AnswerBubble.vue'
-import { IconX } from '../icons/index.js'
+import { IconCheck } from '../icons/index.js'
 
 const store = useTaskStore()
 const session = useSessionStore()
@@ -51,13 +51,20 @@ const pending = computed(() => store.taskStatus === 'running')
 const suspended = computed(() => store.taskStatus === 'suspended')
 const terminal = computed(() => store.taskStatus === 'terminal')
 
-// 取消按钮显隐矩阵（§4.5/B8）：提交前可见；不确定态禁用重试类操作
-const showCancel = computed(() => store.canCancel || (pending.value && !store.writeIssued))
+// 停止按钮：能不能停由 store 说了算（它和后端的取消口径必须一致——
+// 界面上出现一个"点了没反应"的按钮，比没有按钮更糟）。
+const showCancel = computed(() => store.canCancel)
+const stopHint = computed(() =>
+  store.writeIssued
+    ? '这一步已经提交给系统，结果正在核对，暂时不能中断'
+    : '停止这次办理：还没有向系统提交任何变更',
+)
 
 async function send() {
   const text = draft.value.trim()
   if (!text) return
   draft.value = ''
+  stickToBottom.value = true
   if (suspended.value) {
     await store.reply(text)
   } else {
@@ -72,6 +79,7 @@ function chooseCandidate(candidate) {
 }
 
 function cancelTask() {
+  stickToBottom.value = true
   store.cancel()
 }
 
@@ -88,7 +96,7 @@ function handleKeydown(e) {
     send()
     return
   }
-  // Esc：清空输入或取消任务
+  // Esc：清空输入或停止任务
   if (e.key === 'Escape') {
     if (draft.value) {
       draft.value = ''
@@ -114,16 +122,30 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
+// 自动滚动只在"用户本来就在看最新一条"时发生：读历史时被拽回底部是很烦的。
+const stickToBottom = ref(true)
+
+function onScroll() {
+  const el = listEl.value
+  if (!el) return
+  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+}
+
 function scrollBottom() {
+  if (!stickToBottom.value) return
   nextTick(() => listEl.value?.scrollTo({ top: listEl.value.scrollHeight, behavior: 'smooth' }))
 }
 
 // 任一轮出现新事件（或说出新的一句）就滚到底
 watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`).join('|'), scrollBottom)
+watch(() => store.activeTurnId, () => {
+  stickToBottom.value = true
+  scrollBottom()
+})
 </script>
 
 <template>
-  <section class="chat card" aria-label="对话区域">
+  <section class="chat" aria-label="对话区域">
     <div class="pane-head">
       <div class="pane-title">对话</div>
       <button v-if="store.hasAnyTurn" class="btn btn-ghost btn-sm" @click="newConversation">
@@ -131,7 +153,14 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
       </button>
     </div>
 
-    <div ref="listEl" class="messages" role="log" aria-live="polite" aria-label="对话消息">
+    <div
+      ref="listEl"
+      class="messages"
+      role="log"
+      aria-live="polite"
+      aria-label="对话消息"
+      @scroll.passive="onScroll"
+    >
       <EmptyState
         v-if="!store.hasAnyTurn"
         title="开始一次代办"
@@ -153,142 +182,200 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
           :events="turn.events"
           :status="turn.status"
           :cancelled="turn.cancelled === true"
+          :outcome="turn.result?.terminal ?? null"
         />
 
         <template v-for="m in clarifyMessagesOf(turn)" :key="'a' + m.seq">
-          <div
-            class="bubble assistant animate-message-left"
-            :class="{
-              pending: m.kind === 'input-required' && turn.id === store.activeTurnId && pending,
-            }"
-          >
-            {{ m.text }}
-            <span
-              v-if="m.kind === 'input-required' && turn.id === store.activeTurnId && pending"
-              class="pulse-dot"
-              aria-hidden="true"
-            ></span>
-          </div>
-          <!-- 闸门二：候选意图按钮（E5） -->
-          <div
-            v-if="
-              m.kind === 'input-required' &&
-              turn.id === store.activeTurnId &&
-              turn.clarify?.kind === 'intent-choice' &&
-              turn.status === 'suspended'
-            "
-            class="choices"
-          >
-            <button
-              v-for="c in turn.clarify.candidates"
-              :key="c.id"
-              class="btn btn-sm"
-              @click="chooseCandidate(c)"
-            >
-              {{ c.name }}
-            </button>
+          <div class="msg assistant animate-message-left">
+            <span class="avatar" aria-hidden="true"><IconCheck :size="13" /></span>
+            <div class="msg-body">
+              <span
+                class="msg-text"
+                :class="{
+                  pending: m.kind === 'input-required' && turn.id === store.activeTurnId && pending,
+                }"
+              >
+                {{ m.text }}
+                <span
+                  v-if="m.kind === 'input-required' && turn.id === store.activeTurnId && pending"
+                  class="pulse-dot"
+                  aria-hidden="true"
+                ></span>
+              </span>
+              <!-- 闸门二：候选意图按钮（E5） -->
+              <div
+                v-if="
+                  m.kind === 'input-required' &&
+                  turn.id === store.activeTurnId &&
+                  turn.clarify?.kind === 'intent-choice' &&
+                  turn.status === 'suspended'
+                "
+                class="choices"
+              >
+                <button
+                  v-for="c in turn.clarify.candidates"
+                  :key="c.id"
+                  class="btn btn-sm"
+                  @click="chooseCandidate(c)"
+                >
+                  {{ c.name }}
+                </button>
+              </div>
+            </div>
           </div>
         </template>
 
-        <!-- 结论：核心输出（唯一默认可见的助手内容） -->
+        <!-- 结论：核心输出（唯一默认可见的助手内容）——用大字答话，不藏在过程里 -->
         <AnswerBubble :turn="turn" />
       </template>
     </div>
 
-    <!-- 取消按钮（B8/§4.5：写请求发出前可见；提交后不提供任何等价重试/放弃入口） -->
-    <div v-if="showCancel && !terminal" class="cancel-row">
-      <button class="btn btn-danger btn-block" @click="cancelTask">
-        <IconX :size="14" />
-        取消任务（未产生任何变更）
-      </button>
-    </div>
-
-    <!-- 能力入口：说一句就能办（当前角色办得到的那些）；空闲或已办完都可用 -->
-    <div v-if="!pending && !suspended" class="capability">
-      <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
-      <div class="chips">
-        <button v-for="text in examples" :key="text" class="chip" :disabled="pending" @click="useExample(text)">
-          {{ text }}
+    <div class="dock">
+      <!-- 停止：写在输入框正上方（比一条横贯整屏的红条克制，也更像"随手可停"） -->
+      <div v-if="showCancel && !terminal" class="stop-row">
+        <button class="stop-btn" :title="stopHint" @click="cancelTask">
+          <span class="stop-square" aria-hidden="true"></span>
+          停止这次办理
         </button>
+        <span class="stop-hint muted">{{ stopHint }}</span>
       </div>
+
+      <!-- 能力入口：说一句就能办（当前角色办得到的那些）；空闲或已办完都可用 -->
+      <div v-if="!pending && !suspended" class="capability">
+        <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
+        <div class="chips">
+          <button
+            v-for="text in examples"
+            :key="text"
+            class="chip"
+            :disabled="pending"
+            @click="useExample(text)"
+          >
+            {{ text }}
+          </button>
+        </div>
+      </div>
+
+      <ErrorState v-if="store.error" title="请求失败" :message="store.error" :show-retry="false" />
+
+      <Composer
+        ref="composerRef"
+        v-model="draft"
+        :suspended="suspended"
+        :pending="pending"
+        :terminal="terminal"
+        @send="send"
+        @keydown="handleKeydown"
+      />
+
+      <details class="debug">
+        <summary class="muted">调试入口（结构化任务）</summary>
+        <DebugTaskPanel />
+      </details>
     </div>
-
-    <ErrorState v-if="store.error" title="请求失败" :message="store.error" :show-retry="false" />
-
-    <Composer
-      ref="composerRef"
-      v-model="draft"
-      :suspended="suspended"
-      :pending="pending"
-      :terminal="terminal"
-      @send="send"
-      @keydown="handleKeydown"
-    />
-
-    <details class="debug">
-      <summary class="muted">调试入口（结构化任务）</summary>
-      <DebugTaskPanel />
-    </details>
   </section>
 </template>
 
 <style scoped>
+/* 全屏工作台（2026-09-27）：对话区占满右侧整列——头部、消息区、输入区分三层，
+   只有消息区滚动；内容宽度上限 820px 并居中，宽屏下不拉散、也不缩成一条窄卡片。 */
 .chat {
   display: flex;
   flex-direction: column;
-  height: 640px;
-  position: sticky;
-  top: var(--space-5);
-  /* 宽屏下对话不要拉得太散（阅读宽度上限），并在剩余空间里居中 */
-  width: 100%;
-  max-width: 920px;
-  justify-self: center;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface);
 }
 
 .pane-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-3);
+  gap: var(--space-2);
+  height: 46px;
+  padding: 0 max(var(--space-5), calc((100% - 820px) / 2));
+  border-bottom: var(--border-width) solid var(--border);
 }
 
 .pane-title {
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
 }
 
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-2) 0;
+  padding: var(--space-4) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-5);
+}
+
+.dock {
+  flex-shrink: 0;
+  padding: var(--space-2) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-3);
 }
 
 .bubble {
-  max-width: 88%;
+  max-width: 82%;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-lg);
   white-space: pre-wrap;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-normal);
 }
 
+/* 用户气泡：淡蓝底 + 细边框（克制的蓝，不做满色块）；右下角收一个小角表达"我发的" */
 .bubble.user {
   align-self: flex-end;
-  background: var(--accent);
-  color: var(--on-accent);
-  border: none;
+  background: var(--accent-weak);
+  color: var(--accent-900);
+  border: var(--border-width) solid var(--accent-100);
+  border-bottom-right-radius: var(--radius-xs);
 }
 
-.bubble.assistant {
-  align-self: flex-start;
-  background: var(--surface-2);
-  border: var(--border-width) solid var(--border);
+/* 助手消息：不做气泡（回答本来就该像正文一样读），用品牌圆点标明"这是它说的" */
+.msg.assistant {
+  display: flex;
+  gap: var(--space-3);
+  align-self: stretch;
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
 }
 
-.bubble.assistant.pending {
-  border-color: var(--status-uncertain);
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.msg-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: 2px;
+}
+
+.msg-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-text.pending {
+  color: var(--warning-700);
 }
 
 .pulse-dot {
@@ -317,21 +404,44 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
   flex-wrap: wrap;
 }
 
-.cancel-row {
-  margin: var(--space-2) 0;
-}
-
-.cancel {
-  width: 100%;
-  color: var(--status-danger);
-  border-color: var(--status-danger);
-  background: transparent;
-}
-
-.error {
-  color: var(--status-danger);
-  font-size: 12px;
+.stop-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   margin-bottom: var(--space-2);
+}
+
+.stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--danger-200);
+  background: var(--danger-50);
+  color: var(--danger-600);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  flex-shrink: 0;
+}
+
+.stop-btn:hover:not(:disabled) {
+  border-color: var(--danger-400);
+  background: var(--danger-100);
+}
+
+.stop-square {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentcolor;
+}
+
+.stop-hint {
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .capability {
@@ -370,15 +480,6 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
   cursor: default;
 }
 
-.composer {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.composer input {
-  flex: 1;
-}
-
 .debug {
   margin-top: var(--space-3);
   font-size: var(--text-xs);
@@ -395,23 +496,23 @@ watch(() => store.turns.map((t) => `${t.userMessages.length}:${t.events.length}`
 
 /* ========== 响应式 ========== */
 
-@media (max-width: 768px) {
-  .chat {
-    height: auto;
-    min-height: 420px;
-    position: static;
+@media (max-width: 900px) {
+  .pane-head,
+  .messages,
+  .dock {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
   }
 }
 
 @media (max-width: 480px) {
-  .chat {
-    min-height: 360px;
-  }
-
   .bubble {
     max-width: 92%;
-    padding: var(--space-2);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
+  }
+
+  .stop-hint {
+    display: none;
   }
 }
 </style>

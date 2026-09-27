@@ -5,6 +5,7 @@
 //   · 界面上不出现任何接口术语；提示语全部是人话（零术语纪律）
 import { ref } from 'vue'
 import { useSessionStore } from '../stores/session.js'
+import { IconCheck } from '../icons/index.js'
 
 const session = useSessionStore()
 const username = ref('')
@@ -23,7 +24,10 @@ async function submit() {
 <template>
   <div class="login-wrap">
     <form class="card" @submit.prevent="submit">
-      <div class="brand">校园教室代办</div>
+      <div class="brand-row">
+        <span class="brand-mark" aria-hidden="true"><IconCheck :size="14" /></span>
+        <div class="brand">校园教室代办</div>
+      </div>
       <div class="sub">用你在校园系统里的账号登录——我们不另建账号</div>
 
       <label class="field">
@@ -63,14 +67,34 @@ async function submit() {
 }
 
 .card {
-  width: 340px;
+  width: 348px;
   background: var(--surface);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-card);
-  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-5);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  box-shadow: var(--shadow-md);
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: var(--space-1);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-gradient);
+  color: #ffffff;
+  box-shadow: var(--shadow-glow-soft);
+  flex-shrink: 0;
 }
 
 .brand {
@@ -109,14 +133,23 @@ async function submit() {
 
 .primary {
   margin-top: var(--space-2);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--accent-500);
+  color: #ffffff;
   border: none;
   border-radius: var(--radius-small);
   padding: 10px 12px;
   font-size: 14px;
   font-family: inherit;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-600);
+  box-shadow: 0 2px 8px -2px rgba(11, 135, 238, 0.35);
 }
 
 .primary:disabled {

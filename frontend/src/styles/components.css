@@ -58,16 +58,21 @@
   box-shadow: none;
 }
 
-/* 主按钮 */
+/* 主按钮（克制的蓝渐变，简约不艳） */
 .btn-primary {
   background: var(--accent-500);
   border-color: var(--accent-500);
   color: #ffffff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-600);
   border-color: var(--accent-600);
   color: #ffffff;
+  box-shadow: 0 2px 6px -1px rgba(11, 135, 238, 0.3);
+}
+.btn-primary:active:not(:disabled) {
+  box-shadow: none;
 }
 
 /* 危险按钮 */
@@ -115,8 +120,9 @@
 .card {
   background: var(--surface);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-lg);
   padding: var(--space-5);
+  box-shadow: var(--shadow-xs);
   transition:
     box-shadow var(--dur-base) var(--ease-standard),
     border-color var(--dur-fast) var(--ease-standard);
@@ -197,7 +203,7 @@
 
 .input:focus {
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px var(--accent-100);
+  box-shadow: 0 0 0 3px var(--accent-100), 0 2px 8px -2px rgba(11, 135, 238, 0.14);
 }
 
 .input:disabled {

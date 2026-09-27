@@ -246,7 +246,8 @@ export function resolveTimeSegment(segmentName, dateYmd, options) {
     start,
     end,
     needsConfirm: true,
-    explanations: [`「${segmentName}」= ${seg.start}–${seg.end}（部署地墙钟，K2 常量）`],
+    // 文案是要给用户看的（"请确认"注记）：不写内部决策编号（零术语纪律）
+    explanations: [`「${segmentName}」= ${seg.start}–${seg.end}（按部署地时间）`],
   }
 }
 
@@ -374,7 +375,7 @@ function buildClockRange(range, text, dateYmd, options) {
   }
   const [year, month, day] = String(dateYmd).split('-').map(Number)
   const dayStart = wallToInstant({ year, month, day }, assertOptions(options))
-  const explanations = [`「${text}」= ${minutesToHhmm(startMin)}–${minutesToHhmm(endMin)}（部署地墙钟）`]
+  const explanations = [`「${text}」= ${minutesToHhmm(startMin)}–${minutesToHhmm(endMin)}（按部署地时间）`]
   if (!range.start.segmentWord && !range.end.segmentWord) {
     const window = bookableWindowMinutes(options)
     explanations.push(
@@ -432,10 +433,10 @@ export function checkLegacyTimeConstraints({ start, end }, now, options) {
   const offset = assertOptions(options)
   const violations = []
   if (!isSameCalendarDay(start, end, options)) {
-    violations.push('预约不得跨自然日（J4：以部署地自然日为准）')
+    violations.push('预约不得跨自然日（以部署地日期为准）')
   }
   if (!startsInFuture(start, now)) {
-    violations.push('开始时间必须在未来（J4）')
+    violations.push('开始时间必须在未来')
   }
   const window = options?.legacyBookableWindow
   if (window?.start && window?.end) {

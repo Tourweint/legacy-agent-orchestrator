@@ -1,6 +1,8 @@
 /* 设计变量 —— 第 10 章 §七（Stripe 风格取向 + 深浅双主题，G6）。
    颜色只用于表达状态；层级靠字号与留白；细描边优先于阴影。
-   2026-09-26 升级：补全字号层级、完整色阶、阴影、z-index、断点、动效曲线（向后兼容，原有变量不变）。 */
+   2026-09-26 升级：补全字号层级、完整色阶、阴影、z-index、断点、动效曲线（向后兼容，原有变量不变）。
+   2026-09-27 打磨：Accent 由紫色改为淡蓝点缀（主线是黑白灰线条）；补 --radius-medium / --surface-1；
+   新增氛围光晕与克制的渐变令牌（浅色/深色主题各一套）。 */
 
 /* ========== 全局令牌（与主题无关） ========== */
 :root {
@@ -33,7 +35,9 @@
   --radius-xs: 4px;
   --radius-small: 6px;
   --radius-card: 10px;
+  --radius-medium: 12px;
   --radius-lg: 14px;
+  --radius-xl: 20px;
   --radius-pill: 999px;
 
   /* 边框 */
@@ -94,25 +98,31 @@
   /* 基础表面（原有变量，保持不变） */
   --bg: #f7f8fa;
   --surface: #ffffff;
+  --surface-1: #ffffff; /* 与 --surface 同值；供语义化引用（如结论卡） */
   --surface-2: #f2f4f7;
   --border: #e3e8ee;
   --text: #1a1f36;
   --text-muted: #697386;
   --text-faint: #9aa4b8;
 
-  /* Accent 色阶（紫色系，500 为主色） */
-  --accent-50: #f3f3fc;
-  --accent-100: #e8e8f9;
-  --accent-200: #d1d1f3;
-  --accent-300: #b0b0e9;
-  --accent-400: #8b8bf0;
-  --accent-500: #5b5bd6;
-  --accent-600: #4a4ab8;
-  --accent-700: #3d3d96;
-  --accent-800: #33337a;
-  --accent-900: #2a2a63;
-  --accent: #5b5bd6; /* 原有变量别名 */
-  --accent-weak: #eeeefc; /* 原有变量别名 */
+  /* 氛围：背景上的极淡光晕（左上淡蓝、右下青灰），让整页有呼吸感而不抢内容 */
+  --bg-glow-1: rgba(11, 135, 238, 0.055);
+  --bg-glow-2: rgba(59, 130, 246, 0.04);
+  --bg-glow-3: rgba(100, 116, 139, 0.045);
+
+  /* Accent 色阶（淡蓝系，500 为主色；只作点缀，主线是黑白灰线条） */
+  --accent-50: #f0f7ff;
+  --accent-100: #e0eefe;
+  --accent-200: #bae0fd;
+  --accent-300: #7cc4fb;
+  --accent-400: #36a3f7;
+  --accent-500: #0b87ee;
+  --accent-600: #0568cc;
+  --accent-700: #0652a3;
+  --accent-800: #094786;
+  --accent-900: #0c3b6e;
+  --accent: #0b87ee; /* 原有变量别名 */
+  --accent-weak: #eef6ff; /* 原有变量别名 */
   --on-accent: #ffffff; /* 原有变量 */
 
   /* 中性色阶（Gray） */
@@ -171,6 +181,12 @@
 
   /* 状态色：中性 */
   --status-neutral: #697386; /* 原有变量 */
+
+  /* 渐变与光晕（浅色主题专用；克制的蓝，不喧宾夺主） */
+  --accent-gradient: linear-gradient(135deg, #0b87ee 0%, #36a3f7 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(11, 135, 238, 0.09), rgba(54, 163, 247, 0.05));
+  --shadow-glow: 0 0 0 4px var(--accent-100), 0 8px 24px -8px rgba(11, 135, 238, 0.22);
+  --shadow-glow-soft: 0 2px 10px -2px rgba(11, 135, 238, 0.12);
 }
 
 /* ========== 深色主题（投影环境风险对冲，G6） ========== */
@@ -180,26 +196,38 @@
   /* 基础表面（原有变量，保持不变） */
   --bg: #0f131c;
   --surface: #171d2a;
+  --surface-1: #171d2a; /* 与 --surface 同值；供语义化引用 */
   --surface-2: #1e2534;
   --border: #2a3247;
   --text: #e7eaf2;
   --text-muted: #98a2b8;
   --text-faint: #6b7488;
 
-  /* Accent 色阶（深色调亮） */
-  --accent-50: #1a1a3a;
-  --accent-100: #242447;
-  --accent-200: #333366;
-  --accent-300: #5555aa;
-  --accent-400: #7a7adf;
-  --accent-500: #8b8bf0;
-  --accent-600: #a0a0f4;
-  --accent-700: #b5b5f7;
-  --accent-800: #cacafa;
-  --accent-900: #dfdffc;
-  --accent: #8b8bf0; /* 原有变量别名 */
-  --accent-weak: #242447; /* 原有变量别名 */
-  --on-accent: #0f131c; /* 原有变量 */
+  /* 氛围：背景上的极淡光晕（深色下更弱） */
+  --bg-glow-1: rgba(11, 135, 238, 0.07);
+  --bg-glow-2: rgba(59, 130, 246, 0.05);
+  --bg-glow-3: rgba(148, 163, 184, 0.04);
+
+  /* Accent 色阶（深色调亮，仍是蓝） */
+  --accent-50: #0a1a2e;
+  --accent-100: #10263f;
+  --accent-200: #16375c;
+  --accent-300: #1f5291;
+  --accent-400: #2f7fd0;
+  --accent-500: #4d9df0;
+  --accent-600: #6db1f4;
+  --accent-700: #8ec4f7;
+  --accent-800: #b0d7fa;
+  --accent-900: #d4e9fd;
+  --accent: #4d9df0; /* 原有变量别名 */
+  --accent-weak: #10263f; /* 原有变量别名 */
+  --on-accent: #0a1320; /* 原有变量 */
+
+  /* 渐变与光晕（深色主题专用） */
+  --accent-gradient: linear-gradient(135deg, #2f7fd0 0%, #4d9df0 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(47, 127, 208, 0.16), rgba(77, 157, 240, 0.08));
+  --shadow-glow: 0 0 0 4px rgba(77, 157, 240, 0.18), 0 8px 24px -8px rgba(47, 127, 208, 0.35);
+  --shadow-glow-soft: 0 2px 10px -2px rgba(47, 127, 208, 0.25);
 
   /* 中性色阶（深色） */
   --gray-50: #1a1f2e;

@@ -316,11 +316,19 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         taskSeq += 1
         const taskId = `T-${Date.now()}-${taskSeq}`
         const { chain, runner } = newTaskStack(taskId, session)
-        taskStore.register({
+        // 运行栈从任务一开跑就交给 task 对象（原因同 /api/chat：取消要读它的状态）
+        let liveStack = null
+        let taskHandle = null
+        const rememberStack = (stack) => {
+          liveStack = stack
+          if (taskHandle) taskHandle.stack = stack
+        }
+        taskHandle = taskStore.register({
           taskId,
           owner: session.username,
           chain,
           runner,
+          stack: null,
           // 后台执行统一走 runTaskSafely（P1：任意异常收敛为终态，不悬空）
           run: runTaskSafely({
             taskId,
@@ -336,10 +344,12 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
                   : null,
                 reason: body.reason,
                 identity: identityOf(session),
+                onStack: rememberStack,
               }),
             onSuccess: (result) => taskStore.complete(taskId, result),
           }),
         })
+        if (liveStack) taskHandle.stack = liveStack
         // 结果由事件流的终态事件给出（§六：最终结果也由同一条流给出）；另提供 GET 快照兜底
         sendJson(res, 200, ERROR_CODES.OK, 'accepted', { taskId, eventsPath: `/api/tasks/${taskId}/events` })
         return
@@ -370,18 +380,31 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         )
         const history = conversationStore.historyFor(conversationId, session.username)
         const { chain, runner } = newTaskStack(taskId, session)
-        const task = taskStore.register({
+        // 运行栈从任务一开跑就交给 task 对象（此前只在挂起时回填）——
+        // 运行中的取消请求要靠它读到"停在哪个状态"，否则只能一律拒绝（B8，2026-09-27）。
+        let liveStack = null
+        let taskHandle = null
+        const rememberStack = (stack) => {
+          liveStack = stack
+          if (taskHandle) taskHandle.stack = stack
+        }
+        taskHandle = taskStore.register({
           taskId,
           owner: session.username,
           chain,
           runner,
-          stack: null, // 挂起时由下方回填运行栈
+          stack: null, // 由 rememberStack 回填（挂起时是同一份栈的延续）
           // 后台执行统一走 runTaskSafely（P1：任意异常收敛为终态，不悬空）
           run: runTaskSafely({
             taskId,
             chain,
             promiseFactory: () =>
-              runner.executeChatTask({ text: body.text, identity: identityOf(session), history }),
+              runner.executeChatTask({
+                text: body.text,
+                identity: identityOf(session),
+                history,
+                onStack: rememberStack,
+              }),
             onSuccess: (outcome) => {
               // 会话记忆留档：这一轮说了什么、解析成什么、结果如何——它就是下一轮的上下文。
               // 挂起（追问）也要记：用户下一句的"那……"依赖这一轮已说过的信息。
@@ -392,7 +415,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
                 outcome: outcome.suspended ? 'INPUT_REQUIRED' : (outcome.result?.terminal ?? null),
               })
               if (outcome.suspended) {
-                task.stack = outcome.stack
+                taskHandle.stack = outcome.stack
                 taskStore.suspend(taskId, outcome.clarify)
               } else {
                 taskStore.complete(taskId, outcome.result)
@@ -400,7 +423,8 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
             },
           }),
         })
-        void task
+        if (liveStack) taskHandle.stack = liveStack
+        void taskHandle
         sendJson(res, 200, ERROR_CODES.OK, 'accepted', {
           taskId,
           conversationId,
@@ -448,7 +472,11 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         return
       }
 
-      // 取消挂起中的任务（B8：写请求发出前生效；提交后的取消是忽略型无边）
+      // 取消任务（B8 + 2026-09-27 修正）：**写请求发出之前**都可以取消——
+      //   挂起中：立即取消，直接回结论；
+      //   运行中（理解/消解/收集/判定/降级）：置停止标记，由运行循环在下一个状态边界收口，
+      //     本端点先回 202，终态仍由事件流给出（§六：结果只由一条流给出）。
+      //   写请求已发出（提交/判定/查证/补偿）：不受理——副作用可能在飞，只能由查证收敛给结论。
       const cancelMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname)
       if (req.method === 'DELETE' && cancelMatch) {
         if (!requireSession()) return
@@ -457,16 +485,28 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
           sendJson(res, error.status, error.code, error.message)
           return
         }
-        if (task.status !== 'suspended') {
-          sendJson(res, 409, ERROR_CODES.TASK_NOT_SUSPENDED, `任务当前状态为 ${task.status}——已提交后的取消不生效（B8），结果将由查证收敛给出`)
+        if (task.status === 'terminal') {
+          sendJson(res, 409, ERROR_CODES.TASK_NOT_SUSPENDED, '任务已经结束，无需取消')
+          return
+        }
+        if (!task.stack) {
+          sendJson(res, 409, ERROR_CODES.TASK_NOT_SUSPENDED, '任务正在启动，请稍候再试')
           return
         }
         try {
-          const { result } = runnerFor(task).cancelChat({ stack: task.stack })
-          taskStore.complete(task.taskId, result)
-          sendJson(res, 200, ERROR_CODES.OK, 'cancelled', result)
+          const outcome = runnerFor(task).cancelChat({ stack: task.stack })
+          if (outcome.requested) {
+            sendJson(res, 202, ERROR_CODES.OK, 'cancel-requested', {
+              taskId: task.taskId,
+              status: task.status,
+            })
+            return
+          }
+          taskStore.complete(task.taskId, outcome.result)
+          sendJson(res, 200, ERROR_CODES.OK, 'cancelled', outcome.result)
         } catch (err) {
-          sendJson(res, 500, ERROR_CODES.INTERNAL, `取消失败：${err.message}`)
+          // 不能中断时如实说明原因，不假装取消成功——界面据此告诉用户"结果正在核对"
+          sendJson(res, 409, ERROR_CODES.TASK_NOT_SUSPENDED, err.message)
         }
         return
       }

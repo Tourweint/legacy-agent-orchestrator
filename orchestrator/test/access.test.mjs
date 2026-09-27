@@ -13,7 +13,7 @@ import { ConfigStore } from '../src/config/config-store.js'
 import { IdentityPool } from '../src/contact/identity-pool.js'
 import { UserTokenStore } from '../src/contact/user-token-store.js'
 import { SessionStore } from '../src/access/session-store.js'
-import { makeGateway, ok, envelope, httpOnly, UIDS } from './helpers/fake-legacy.js'
+import { makeGateway, ok, envelope, httpOnly, loginRejected, UIDS } from './helpers/fake-legacy.js'
 
 process.env.ORCH_LEGACY_ADMIN_PASSWORD ||= 'test-pw-admin'
 process.env.ORCH_LEGACY_TEACHER_PASSWORD ||= 'test-pw-teacher'
@@ -50,7 +50,7 @@ async function startServer(world = {}, llmResponses = null) {
       case '/reservations/classrooms': return world.create ?? ok(120)
       default: return ok(null)
     }
-  })
+  }, { auth: world.auth })
   const pool = new IdentityPool({
     configStore: store, transport, adapters, constants: store.getConstants(),
   })
@@ -155,6 +155,45 @@ test('登录链路：login 发会话 Cookie → me 可用 → logout 后会话�
     assert.ok(transport.calls.some((c) => c.path === '/auth/logout'))
   } finally {
     server.close()
+  }
+})
+
+test('登录失败分流：业务码 401 说"账号或密码不正确"；业务码 500 不得说成密码错', async () => {
+  // 实测口径（2026-09-27）：密码错 = HTTP 200 + 业务码 401；Redis 缺席 = 业务码 500。
+  // 旧实现把两者都说成"账号或密码不正确"，会把人引向错误的排查方向。
+  const wrongPassword = await startServer({ auth: () => loginRejected(401, '用户或密码错误') })
+  try {
+    const { httpStatus, body } = await login(wrongPassword.base, '233', 'whatever')
+    assert.equal(httpStatus, 401)
+    assert.equal(body.code, AUTH_ERROR_CODES.BAD_CREDENTIALS)
+    assert.equal(body.message, '账号或密码不正确')
+  } finally {
+    wrongPassword.server.close()
+  }
+
+  const brokenDependency = await startServer({ auth: () => loginRejected(500, '登录失败') })
+  try {
+    const { httpStatus, body } = await login(brokenDependency.base, '233', 'test-pw-teacher')
+    // 对外契约不变（仍是 401 + 4013，不给枚举探测的口子），变的只是消息
+    assert.equal(httpStatus, 401)
+    assert.equal(body.code, AUTH_ERROR_CODES.BAD_CREDENTIALS)
+    assert.match(body.message, /存量系统返回异常（业务码 500）/)
+    assert.doesNotMatch(body.message, /账号或密码不正确/)
+  } finally {
+    brokenDependency.server.close()
+  }
+
+  // 实测（2026-09-27）：Redis 缺席时，存量系统的登录请求会**挂住**，引擎侧表现为传输超时
+  // （不是业务码 500）——这才是最常遇到的那一种，同样不能说成"账号或密码不正确"
+  const stalled = await startServer({ auth: () => ({ kind: 'timeout' }) })
+  try {
+    const { httpStatus, body } = await login(stalled.base, '233', 'test-pw-teacher')
+    assert.equal(httpStatus, 401)
+    assert.equal(body.code, AUTH_ERROR_CODES.BAD_CREDENTIALS)
+    assert.match(body.message, /存量系统响应超时/)
+    assert.doesNotMatch(body.message, /账号或密码不正确/)
+  } finally {
+    stalled.server.close()
   }
 })
 

@@ -48,10 +48,23 @@ function makeTurn(userText, index) {
     clarify: null,
     // 用户主动取消（界面要如实说"已停止"而不是"没办成"）
     cancelled: false,
+    // 已请求停止、但引擎还在收口（运行中的取消是异步收口的：下一个状态边界才落终态）
+    cancelRequested: false,
     sseState: 'closed',
     reconnectAttempt: 0,
     reconnectDelay: 0,
   }
+}
+
+/**
+ * 终态到达时收口"已请求停止"：
+ * 引擎确实按取消收的场（REJECTED）→ 界面说"已取消"；
+ * 若请求与终态擦肩而过（已经办成了）→ 如实说办成了，不冒充取消。
+ */
+function settleCancelledTurn(turn) {
+  if (!turn.cancelRequested) return
+  if (turn.result?.terminal === 'REJECTED') turn.cancelled = true
+  turn.cancelRequested = false
 }
 
 export const useTaskStore = defineStore('task', {
@@ -79,15 +92,20 @@ export const useTaskStore = defineStore('task', {
     clarify: (s) => s.activeTurn?.clarify ?? null,
 
     terminalEvent: (s) => (s.activeTurn?.events ?? []).find((e) => e.type === 'terminal') ?? null,
-    // 取消按钮矩阵（§4.5/B8）：出现 P3+ 事件即写请求已发出 → 禁用；挂起态可取消
+    // 取消按钮矩阵（§4.5/B8 + 2026-09-27 修正）：出现 P3+ 事件即写请求已发出 → 不可中断；
+    // 挂起态与"运行中但尚未发出写请求"都可以取消——与引擎侧 CANCELABLE_STATES 同一口径，
+    // 界面上不会出现"按钮点得动、后台却一律拒绝"的落差。
     writeIssued: (s) =>
-      (s.activeTurn?.events ?? []).some(
-        (e) => (e.phase ?? 'P6') >= 'P3' && ['P3', 'P4', 'P5'].includes(e.phase),
+      (s.activeTurn?.events ?? []).some((e) =>
+        ['P3', 'P4', 'P5'].includes(e.phase ?? 'P6'),
       ),
-    canCancel: (s) =>
-      s.activeTurn?.status === 'suspended' ||
-      (s.activeTurn?.status === 'running' &&
-        !(s.activeTurn?.events ?? []).some((e) => ['P3', 'P4', 'P5'].includes(e.phase ?? 'P6'))),
+    canCancel: (s) => {
+      const turn = s.activeTurn
+      if (!turn) return false
+      if (turn.cancelRequested) return false // 已经请求过了，等引擎收口
+      if (turn.status === 'suspended') return true
+      return turn.status === 'running' && !s.writeIssued
+    },
     eventsByPhase: (s) => {
       const grouped = {}
       for (const p of PHASES) grouped[p.key] = []
@@ -143,6 +161,7 @@ export const useTaskStore = defineStore('task', {
         status:
           t.status === 'running' || t.status === 'suspended' ? 'terminal' : (t.status ?? 'terminal'),
         cancelled: t.cancelled === true,
+        cancelRequested: false, // 恢复的轮次不再有"正在收口"这种中间态
         events: [...(t.events ?? [])],
         result: t.result ?? null,
         entriesBySeq: {},
@@ -160,9 +179,17 @@ export const useTaskStore = defineStore('task', {
       useConversationsStore().upsert(this.snapshot())
     },
 
+    /**
+     * 开一轮。
+     *
+     * ⚠️ 必须返回 **`this.turns` 里那一份**（Pinia 的响应式代理），不能返回刚 push 进去的原始对象：
+     * reactive 是"读时才代理"的——对原始对象赋值不经过代理的 set 拦截，视图收不到通知。
+     * 症状极具迷惑性：store 里的数据全是新的（getter 读的是代理，值没错），
+     * 界面却一直停在"运行中"，用户以为卡死只能重启（2026-09-27 联调定位）。
+     */
     _newTurn(userText) {
-      const turn = makeTurn(userText, this.turns.length)
-      this.turns.push(turn)
+      this.turns.push(makeTurn(userText, this.turns.length))
+      const turn = this.turns[this.turns.length - 1]
       this.activeTurnId = turn.id
       return turn
     },
@@ -203,6 +230,7 @@ export const useTaskStore = defineStore('task', {
       if (snapshot.code === 0) {
         turn.result = snapshot.data.result
         turn.status = 'terminal'
+        settleCancelledTurn(turn)
       }
       await this.ensureEvidence(turn.taskId)
       this._persist()
@@ -283,6 +311,12 @@ export const useTaskStore = defineStore('task', {
       if (!turn?.taskId) return
       const res = await apiCancel(turn.taskId)
       if (res.code === 0) {
+        // 202 = 运行中的取消：停止标记已置，引擎会在下一个状态边界落终态。
+        // 这里**不假装已经停住**——等事件流的终态到达再改口（settleCancelledTurn）。
+        if (res.httpStatus === 202) {
+          turn.cancelRequested = true
+          return
+        }
         turn.cancelled = true
         turn.status = 'terminal'
         turn.result = res.data
@@ -307,7 +341,18 @@ export const useTaskStore = defineStore('task', {
             // 终态事件未到达时的兜底（正常由 SSE 终态事件驱动）
             turn.status = 'terminal'
             turn.result = d.result
+            settleCancelledTurn(turn)
           }
+        } else if (snap.httpStatus === 404) {
+          // 引擎重启后任务已不存在（K3：运行栈与补偿清单随任务销毁）。
+          // 追不回来了就如实收场——界面停在"运行中"只会逼用户去重启，那正是要消灭的体验。
+          turn.status = 'terminal'
+          turn.result = {
+            terminal: 'FAILED',
+            conclusion: '这次任务在服务重启后已无法继续跟踪，请重新说一遍。',
+          }
+          this._persist()
+          return
         }
         if (turn.status !== 'terminal') {
           setTimeout(tick, 1200)

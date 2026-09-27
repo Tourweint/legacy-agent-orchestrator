@@ -18,8 +18,21 @@ body {
   padding: 0;
 }
 
+/* 全屏工作台（2026-09-27）：外壳占满视口高度，滚动只发生在消息区内部——
+   页面本身不滚动，才不会出现"输入框被挤到视口外"的观感。 */
+html,
+body,
+#app {
+  height: 100%;
+}
+
 body {
   background: var(--bg);
+  background-image:
+    radial-gradient(1100px 560px at 8% -6%, var(--bg-glow-1), transparent 62%),
+    radial-gradient(900px 480px at 96% 4%, var(--bg-glow-2), transparent 58%),
+    radial-gradient(820px 520px at 50% 112%, var(--bg-glow-3), transparent 62%);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
   font-size: var(--text-base);

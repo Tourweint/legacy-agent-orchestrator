@@ -12,6 +12,23 @@ import { normalizeSpace } from '../judgment/predicates.js'
 import { describeRange, resolveRelativeRange } from '../canonical/time.js'
 import { parseClassroomName } from '../canonical/classroom-name.js'
 
+/**
+ * 取消受理的状态集合（B8 + 2026-09-27 修正）：
+ * 这些都是**写请求尚未发出**的状态——在这里取消等于放弃，不会产生任何副作用。
+ * 与它相对的是 WRITE_STATES（副作用可能已在飞）：那里的取消是"忽略型无边"，
+ * 必须由查证收敛给出确定结论，不能让界面假装"停了"。
+ */
+export const CANCELABLE_STATES = new Set([
+  'AWAIT_CLARIFY',
+  'UNDERSTANDING',
+  'RESOLVING',
+  'GATHERING',
+  'VALIDATING',
+  'DEGRADING',
+])
+
+export const WRITE_STATES = new Set(['SUBMITTING', 'JUDGING', 'VERIFYING', 'COMPENSATING'])
+
 function machineGuard(taskContext) {
   if (!taskContext.machine) throw new OrchestrationError('taskContext.machine 未初始化（由 TaskRunner 注入）')
 }
@@ -63,6 +80,17 @@ export class RunEngine {
   // 驱动循环：终态或挂起时返回；其余状态逐个交给处理器
   async #drive({ machine, taskContext, resource, kind }) {
     while (!isTerminal(machine.state) && machine.state !== 'AWAIT_CLARIFY') {
+      // 运行中的取消请求（B8 + 2026-09-27）：在**状态边界**收口——不打断正在飞的调用，
+      // 也不让它继续往下走。收口走的是与挂起态取消同一条边（USER_CANCELLED → REJECTED），
+      // 用户因此在界面上看到的是同一个"已取消"，而不是两种取消。
+      if (taskContext.cancelRequested) {
+        taskContext.cancelRequested = false
+        if (CANCELABLE_STATES.has(machine.state)) {
+          taskContext.outcome = { message: '已按您的要求取消，未产生任何变更。' }
+          machine.fire('USER_CANCELLED')
+          continue
+        }
+      }
       switch (machine.state) {
         case 'UNDERSTANDING': await this.chatBridge.handleUnderstanding({ machine, taskContext }); break
         case 'RESOLVING': await this.#doResolving({ machine, resource, taskContext }); break

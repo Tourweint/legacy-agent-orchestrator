@@ -169,7 +169,8 @@ function makeChatRunner(world, llmResponses) {
       case '/classrooms/4': return ok({ id: 4, building: '数智楼', roomNumber: '222', capacity: 55, status: 'ENABLED' })
       case '/classrooms/5': return ok({ id: 5, building: '数智楼', roomNumber: '123', capacity: 48, status: 'ENABLED' })
       case '/classrooms/available_list':
-        return ok(world.availableRows ?? [
+        // availableDeferred：让这一步停住（用于"运行中取消"的用例——取消发生在写请求之前）
+        return world.availableDeferred ?? ok(world.availableRows ?? [
           { id: 4, building: '数智楼', roomNumber: '222', capacity: 55, status: 'ENABLED' },
           { id: 5, building: '数智楼', roomNumber: '123', capacity: 48, status: 'ENABLED' },
         ])
@@ -181,7 +182,7 @@ function makeChatRunner(world, llmResponses) {
       case '/admin/reservations': return ok(world.adminRows ?? [])
       case '/reservations': return ok(world.mineRows ?? []) // F5 我的预约（C7 用例在这里造数据）
       case '/admin/maintenance': return ok([])
-      case '/reservations/classrooms': return world.create ?? ok(120)
+      case '/reservations/classrooms': return world.createDeferred ?? world.create ?? ok(120)
       default: {
         const barePath = String(req.path).split('?')[0]
         // C12 座位级：座位布局（F2）、该时段被占座位（F3）、提交座位预约
@@ -361,6 +362,73 @@ test('取消挂起任务：B8 写请求前取消生效 → REJECTED', async () =
   const { result } = runner.cancelChat({ stack: first.stack })
   assert.equal(result.terminal, 'REJECTED')
   assert.ok(result.conclusion.includes('未产生任何变更'))
+})
+
+test('取消运行中的任务：写请求未发出前受理，运行循环在状态边界收口为 REJECTED', async () => {
+  let release
+  const gate = new Promise((r) => {
+    release = r
+  })
+  const { runner, chain } = makeChatRunner({ availableDeferred: gate }, [validOutput()])
+
+  let stack = null
+  const running = runner.executeChatTask({
+    text: '帮我借下周三下午数智楼222',
+    identity: sessionIdentity('TEACHER'),
+    onStack: (s) => {
+      stack = s
+    },
+  })
+  // 运行栈一开跑就该拿得到：修复前它只在**挂起时**回填，于是运行中的取消连状态都读不到
+  assert.ok(stack, 'onStack 必须给出运行栈')
+
+  for (let i = 0; i < 100 && stack.machine.state !== 'RESOLVING'; i += 1) {
+    await new Promise((r) => setTimeout(r, 2))
+  }
+  assert.equal(stack.machine.state, 'RESOLVING', '应当停在消解（正在等被卡住的假请求）')
+
+  const outcome = runner.cancelChat({ stack })
+  assert.equal(outcome.requested, true, '写请求未发出 → 应当受理取消')
+
+  release(ok([{ id: 4, building: '数智楼', roomNumber: '222', capacity: 55, status: 'ENABLED' }])) // 放行；收口发生在下一个状态边界
+  const { result } = await running
+  assert.equal(result.terminal, 'REJECTED')
+  assert.ok(result.conclusion.includes('未产生任何变更'))
+  // 取消前已发出的只读调用不算数；**写入**一次都不能有（取消发生在写请求之前）
+  assert.equal(
+    chain
+      .getEntries()
+      .filter((e) => String(e.action).startsWith('contact:') && /create|cancel/i.test(e.action)).length,
+    0,
+    '取消之后不得有任何写入',
+  )
+})
+
+test('写请求已发出后不受理取消：如实说明"结果正在核对"，任务照常跑完', async () => {
+  let release
+  const gate = new Promise((r) => {
+    release = r
+  })
+  const { runner } = makeChatRunner({ createDeferred: gate }, [validOutput()])
+
+  let stack = null
+  const running = runner.executeChatTask({
+    text: '帮我借下周三下午数智楼222',
+    identity: sessionIdentity('TEACHER'),
+    onStack: (s) => {
+      stack = s
+    },
+  })
+  for (let i = 0; i < 300 && stack.machine.state !== 'SUBMITTING'; i += 1) {
+    await new Promise((r) => setTimeout(r, 2))
+  }
+  assert.equal(stack.machine.state, 'SUBMITTING')
+
+  assert.throws(() => runner.cancelChat({ stack }), /提交给系统/, '副作用可能在飞，取消必须被拒绝')
+
+  release(ok(120))
+  const { result } = await running
+  assert.equal(result.terminal, 'DONE', '不受理取消 → 任务按真实结果收场')
 })
 
 test('闸门三机械算缺：模型漏报 missing 也不影响（缺口由计划计算，不采信模型）', async () => {

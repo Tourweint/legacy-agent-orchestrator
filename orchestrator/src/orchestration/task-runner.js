@@ -15,7 +15,7 @@
 import { OrchestrationError } from './orchestration-error.js'
 import { authorizeIntent, roleLabel } from './intent-authorizer.js'
 import { TaskMachine } from './state-machine.js'
-import { RunEngine } from './run-engine.js'
+import { RunEngine, CANCELABLE_STATES, WRITE_STATES } from './run-engine.js'
 import { Verifier } from './verifier.js'
 import { ChatBridge } from './chat-bridge.js'
 
@@ -70,7 +70,7 @@ export class TaskRunner {
    * @param {object} p.slot          {start, end} 绝对时刻
    * @param {object} p.identity      {id} 业务身份
    */
-  async executeTask({ intentId, resources, slot, reason, identity }) {
+  async executeTask({ intentId, resources, slot, reason, identity, onStack }) {
     const intent = this.store.getIntent(intentId)
     // 目标不是教室的意图（C7）：不需要调用方给资源目标，引擎自己从"我的预约"里定位那一条记录
     const targetless = intent.requiresEntityResolution === false
@@ -86,6 +86,7 @@ export class TaskRunner {
     const denial = authorizeIntent({ intent, identity: this.#identityWithRole(identity) })
     if (denial) return this.#rejectForbidden({ intent, denial, identity })
     const stack = this.#newStack()
+    onStack?.(stack) // 运行期间让调用方也拿得到运行栈（取消要读它的状态，见 cancelChat）
     stack.taskContext.intent = intent
     stack.taskContext.intentId = intent.id
     const { result } = await this.#driveQueue({
@@ -108,8 +109,11 @@ export class TaskRunner {
    * @param {Array}  [p.history] 会话记忆（上一轮及更早的结构化摘要，来自 ConversationStore）
    * @returns {{result}|{suspended: true, clarify, stack}} 另附 understanding（本轮理解摘要，供会话留档）
    */
-  async executeChatTask({ text, identity, history = [] }) {
+  async executeChatTask({ text, identity, history = [], onStack }) {
     const stack = this.#newStack()
+    // 运行期间把运行栈交给调用方（接入层据此判断"能不能取消"、停在哪个状态）；
+    // 此前只在**挂起时**回填，于是运行中的取消请求连状态都读不到，只能一律拒绝。
+    onStack?.(stack)
     // 会话记忆先铺底：理解层因此看得到"上一句说的是哪间教室/哪个时段"；
     // 本任务内追问产生的对话（clarify ↔ 回复）继续追加在其后（chat-bridge 负责）
     stack.taskContext.chat.history = [...history]
@@ -212,17 +216,37 @@ export class TaskRunner {
     return this.#finish(stack, 'REJECTED')
   }
 
-  /** 取消挂起中的任务（B8：写请求发出前取消才生效——AWAIT_CLARIFY 必然在提交前）。 */
+  /**
+   * 取消任务。
+   *
+   * 口径（B8 + 2026-09-27 修正）：**写请求发出之前**都可以取消——
+   *   · 挂起中（AWAIT_CLARIFY）：立即取消，直接落 REJECTED；
+   *   · 运行中但尚未发出写请求（理解/消解/收集/判定/降级）：置停止标记，
+   *     由运行循环在下一个状态边界收口（用户点一下就该停，不该被"运行中"挡住）。
+   * 写请求一旦发出（SUBMITTING 及之后）：**不受理**——副作用可能已经在飞，
+   * 此时"取消"是个谎言；只能由查证收敛给出确定结论（I3/I6）。
+   *
+   * @returns {{result}|{requested:true}}
+   */
   cancelChat({ stack }) {
-    if (stack.machine.state !== 'AWAIT_CLARIFY') {
-      const err = new OrchestrationError('任务不在挂起态，取消不生效（B8：该状态的取消是忽略型无边）')
-      err.code = 'CANCEL_NOT_EFFECTIVE'
-      throw err
+    const state = stack.machine.state
+    if (state === 'AWAIT_CLARIFY') {
+      stack.taskContext.outcome = { message: '已按您的要求取消，未产生任何变更。' }
+      stack.machine.fire('USER_CANCELLED') // → REJECTED
+      this.#pushRunResult(stack, { terminal: stack.machine.state, message: stack.taskContext.outcome.message })
+      return { result: this.#finish(stack, stack.machine.state) }
     }
-    stack.taskContext.outcome = { message: '已按您的要求取消，未产生任何变更。' }
-    stack.machine.fire('USER_CANCELLED') // → REJECTED
-    this.#pushRunResult(stack, { terminal: stack.machine.state, message: stack.taskContext.outcome.message })
-    return { result: this.#finish(stack, stack.machine.state) }
+    if (CANCELABLE_STATES.has(state)) {
+      stack.taskContext.cancelRequested = true
+      return { requested: true }
+    }
+    const err = new OrchestrationError(
+      WRITE_STATES.has(state)
+        ? '这一步已经提交给系统了，结果正在核对，暂时不能中断（取消只在写请求发出前生效）'
+        : '任务已经结束，无需取消',
+    )
+    err.code = 'CANCEL_NOT_EFFECTIVE'
+    throw err
   }
 
   // 资源队列驱动：逐运行执行 + §5.8 任务级映射（UNRESOLVED 早退 / DONE / 补偿 / 清单空）

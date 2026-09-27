@@ -38,9 +38,11 @@ defineProps({
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--text-faint);
+  background: var(--accent-gradient-soft);
+  border: var(--border-width) solid var(--accent-100);
+  color: var(--accent-500);
   margin-bottom: var(--space-1);
+  box-shadow: var(--shadow-glow-soft);
 }
 
 .empty-title {

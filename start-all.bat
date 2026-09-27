@@ -7,16 +7,27 @@ rem ============================================================================
 rem  一键启动（Windows）—— 存量系统 8080 / 编排引擎 8090 / 对话前端 5173
 rem
 rem  用法（双击运行等价于 all）：
-rem    start-all.bat [all|legacy|legacyui|engine|web|deps|dry]
-rem      all       启动四个进程（默认）
+rem    start-all.bat [all|legacy|legacyui|engine|web|redis|deps|dry]
+rem      all       启动五个进程（默认）：Redis 6379 + 存量系统 8080 + 引擎 8090
+rem                + 前端 5173 + 存量界面 5174
 rem      legacy    只启动存量系统后端（8080）
 rem      legacyui  只启动存量系统**界面**（5174）——双屏对照的右侧那一屏；
 rem                它就是存量系统自带的前端，本脚本只用命令行覆盖端口
 rem                （存量前端默认端口 5173 与我们的对话前端撞车），**不改它的任何文件**
 rem      engine    只启动编排引擎（8090）
 rem      web       只启动对话前端（5173）
+rem      redis     只启动 Redis（6379）
 rem      deps      只做前置检查，不启动任何进程
 rem      dry       只打印将要执行的命令，不启动、不等待
+rem
+rem  Redis 自动拉起（2026-09-27）：
+rem    all / legacy / legacyui / redis 四种模式会**先确保 6379 就绪**——已在运行则跳过，
+rem    未运行则自动定位 redis-server 并拉起（数据目录 deploy\data\redis，AOF 持久化，
+rem    与 deploy/scripts/start-redis.sh 同口径）。
+rem    为什么必须这样：存量系统的登录会话/刷新令牌/设备会话全部存在 Redis 里，
+rem    缺它时登录会被存量系统拒绝，而界面上只显示"账号或密码不正确"——把你引向错误方向。
+rem    因此找不到 redis-server 时**明确中止并指名**，不静默跳过。
+rem    定位顺序：环境变量 REDIS_SERVER → PATH → scoop → 常见安装路径。
 rem
 rem  可选的环境变量文件（存在即载入，不存在用内置默认值）：
 rem    deploy\config\legacy.env        存量系统库/Redis/JDK 配置（模板见 legacy.env.example）
@@ -37,7 +48,7 @@ set "FAILED=0"
 
 echo ============================================================================
 echo  legacy-agent-orchestrator 一键启动     仓库：%ROOT%
-echo  模式：%MODE% ^(all/legacy/legacyui/engine/web/deps/dry^)
+echo  模式：%MODE% ^(all/legacy/legacyui/engine/web/redis/deps/dry^)
 echo ============================================================================
 echo.
 
@@ -85,8 +96,23 @@ if not exist "%ROOT%\orchestrator\node_modules" echo   [提示] orchestrator\nod
 if not exist "%ROOT%\frontend\node_modules" set "NEED_WEB_INSTALL=1"
 if not exist "%ROOT%\mock-legacy\frontend\node_modules" set "NEED_LEGACYUI_INSTALL=1"
 
-call :portListening 6379
-if errorlevel 1 (echo   [✗] Redis 6379 未监听 —— 登录后所有接口会返回 401，请先启动 Redis) else echo   [√] Redis 6379
+rem ---- Redis：存量系统的登录/会话依赖。本脚本会**自动拉起**（见 :startRedis）----
+set "REDIS_PORT=%SPRING_DATA_REDIS_PORT%"
+set "REDIS_DATA=%ROOT%\deploy\data\redis"
+call :portListening %REDIS_PORT%
+if not errorlevel 1 (
+  set "P6379=1"
+  echo   [√] Redis %REDIS_PORT% 已在运行
+) else (
+  set "P6379=0"
+  call :findRedis
+  if defined REDIS_EXE (
+    echo   [√] Redis %REDIS_PORT% 空闲 —— 本次自动启动：!REDIS_EXE!
+  ) else (
+    echo   [✗] Redis %REDIS_PORT% 未监听，且找不到 redis-server.exe ^(装：scoop install redis^，
+    echo       或设 REDIS_SERVER 指向 redis-server.exe^)
+  )
+)
 call :portListening 3306
 if errorlevel 1 (echo   [✗] MariaDB/MySQL 3306 未监听 —— 存量系统起不来) else echo   [√] MariaDB 3306
 
@@ -105,17 +131,39 @@ if "%FAILED%"=="1" (
   echo   [中止] 缺少必需的前置（Node.js / JDK 17）。修好后重跑本脚本。
   goto :end
 )
+rem Redis 缺席时只有 engine/web 能继续（它们不碰存量系统的会话）；其余模式一律中止——
+rem 让"Redis 没起"当场说清楚，好过登录时被显示成"账号或密码不正确"
+if "%P6379%"=="0" if not defined REDIS_EXE if /i not "%MODE%"=="engine" if /i not "%MODE%"=="web" (
+  echo   [中止] 存量系统的登录与会话依赖 Redis：缺它时登录会被存量系统拒绝，
+  echo          而界面上只显示"账号或密码不正确"——会把你引向错误的排查方向。
+  echo          装 Redis（scoop install redis），或设置 REDIS_SERVER 指向 redis-server.exe，再重跑。
+  goto :end
+)
 
 rem ------------------------------------------------------------------ 启动进程 --
 set "JAVA_HOME=%JDK17_HOME%"
 set "PATH=%JDK17_HOME%\bin;%PATH%"
 
-if /i "%MODE%"=="legacy" goto :startLegacy
-if /i "%MODE%"=="legacyui" goto :startLegacyUI
+if /i "%MODE%"=="redis" goto :startRedis
+if /i "%MODE%"=="legacy" goto :startRedis
+if /i "%MODE%"=="legacyui" goto :startRedis
 if /i "%MODE%"=="engine" goto :startEngine
 if /i "%MODE%"=="web" goto :startWeb
-if /i "%MODE%"=="all" goto :startLegacy
+if /i "%MODE%"=="all" goto :startRedis
 goto :summary
+
+:startRedis
+rem Redis 是存量系统的前置：all / legacy / legacyui / redis 四种模式都从这里过一道。
+if "%P6379%"=="1" goto :afterRedis
+if not exist "%REDIS_DATA%" mkdir "%REDIS_DATA%" >nul 2>nul
+set "PATH=%REDIS_DIR%;%PATH%"
+rem 窗口的工作目录就是 Redis 数据目录（--dir 的默认值），命令行里因此不必再拼含空格的路径
+call :launch "Redis %REDIS_PORT%" "%REDIS_DATA%" "redis-server --port %REDIS_PORT% --appendonly yes"
+set "REDIS_OWN=1"
+:afterRedis
+if /i "%MODE%"=="redis" goto :waitLoop
+if /i "%MODE%"=="legacyui" goto :startLegacyUI
+goto :startLegacy
 
 :startLegacy
 if "%P8080%"=="1" goto :startEngine
@@ -159,6 +207,10 @@ rem ------------------------------------------------------------------ 等待就
 :waitLoop
 if "%DRY%"=="1" goto :summary
 echo ---- 等待服务就绪（最多 90 秒）-------------------------------------------
+if "%REDIS_OWN%"=="1" (
+  call :waitPort %REDIS_PORT% 15
+  if errorlevel 1 (echo   [✗] Redis %REDIS_PORT% 未就绪 —— 看那个窗口的日志) else echo   [√] Redis %REDIS_PORT%
+)
 if /i "%MODE%"=="all" if "%P8080%"=="0" (
   call :waitPort 8080 90
   if errorlevel 1 (echo   [✗] 存量系统 8080 未就绪 —— 看那个窗口的日志) else echo   [√] 存量系统 8080
@@ -200,6 +252,7 @@ rem ---------------------------------------------------------------------- 汇�
 echo ============================================================================
 echo  入口与下一步
 echo ----------------------------------------------------------------------------
+echo   Redis             localhost:%REDIS_PORT%        （存量系统的登录/会话依赖；本脚本自动拉起）
 echo   前端（对话界面）  http://localhost:5173
 echo   编排引擎健康检查  http://localhost:8090/api/health
 echo   存量系统后端      http://localhost:8080        （Swagger: /swagger-ui.html）
@@ -248,6 +301,23 @@ exit /b 0
 :checkDir
 rem %~1 = 待检查的路径  %~2 = 说明
 if exist "%~1" (echo   [√] %~2) else (echo   [警告] 不存在：%~2)
+exit /b 0
+
+:findRedis
+rem 定位 redis-server.exe：结果写进 REDIS_EXE（未找到则留空）与 REDIS_DIR（供 PATH 用）。
+rem 顺序：环境变量 REDIS_SERVER → PATH → scoop → 常见安装路径。新装法只要落在这几处即可免配置。
+set "REDIS_EXE="
+set "REDIS_DIR="
+if defined REDIS_SERVER if exist "%REDIS_SERVER%" set "REDIS_EXE=%REDIS_SERVER%"
+if not defined REDIS_EXE for /f "delims=" %%R in ('where redis-server 2^>nul') do if not defined REDIS_EXE set "REDIS_EXE=%%R"
+if not defined REDIS_EXE for %%P in (
+    "%USERPROFILE%\scoop\apps\redis\current\redis-server.exe"
+    "%USERPROFILE%\scoop\shims\redis-server.exe"
+    "C:\Program Files\Redis\redis-server.exe"
+    "C:\Program Files (x86)\Redis\redis-server.exe"
+    "C:\ProgramData\chocolatey\bin\redis-server.exe"
+  ) do if not defined REDIS_EXE if exist %%P set "REDIS_EXE=%%~P"
+if defined REDIS_EXE for %%A in ("%REDIS_EXE%") do set "REDIS_DIR=%%~dpA"
 exit /b 0
 
 :portListening

@@ -13,9 +13,14 @@ const props = defineProps({
   events: { type: Array, default: () => [] },
   status: { type: String, default: 'idle' },
   cancelled: { type: Boolean, default: false },
+  // 终态（DONE / REJECTED / FAILED / UNRESOLVED）：决定"要不要主动摊开过程"——
+  // 办成了就收起（答案已在超大字号里），没办成才自动展开失败链。
+  outcome: { type: String, default: null },
 })
 
-const thinking = computed(() => buildThinking(props.events, { taskStatus: props.status }))
+const thinking = computed(() =>
+  buildThinking(props.events, { taskStatus: props.status, outcome: props.outcome }),
+)
 
 // 用户手动操作优先：动过一次之后不再自动变化——
 // 读着读着界面自己收起来了，比"默认不展开"更糟。
@@ -49,7 +54,9 @@ const title = computed(() => {
   if (running.value) return `正在办理 · ${currentPhaseName.value}`
   if (suspended.value) return `等待你补充信息 · 已走 ${t.steps} 步`
   if (props.cancelled) return `已停止 · 完成 ${t.steps} 步`
-  if (hasFailures.value) return `为什么没办成 · ${t.failCount} 项没通过`
+  // "为什么是这个结果"而不是"为什么没办成"：查询类同样会有不成立的命题，
+  // 而那时用户要问的是"你凭什么这么答"，不是"哪里办错了"。
+  if (hasFailures.value) return `为什么是这个结果 · ${t.failCount} 项不通过`
   return `思考过程 · ${t.steps} 步 · ${formatDuration(t.durationMs)}`
 })
 
@@ -92,24 +99,27 @@ function toggle() {
 }
 
 .head {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  background: transparent;
-  border: none;
-  padding: var(--space-1) var(--space-2);
-  margin-left: -6px;
-  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  color: var(--text-faint);
+  color: var(--text-muted);
   font-size: var(--text-xs);
   font-family: inherit;
-  transition: color var(--dur-fast) var(--ease-standard);
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
 }
 
 .head:hover {
-  color: var(--text-muted);
-  background: var(--surface-2);
+  color: var(--accent-700);
+  background: var(--accent-weak);
+  border-color: var(--accent-200);
 }
 
 .head:focus-visible {
@@ -129,16 +139,26 @@ function toggle() {
 
 .running .head {
   color: var(--accent);
+  border-color: var(--accent-200);
+  background: var(--accent-weak);
 }
 
 .failed .head {
   color: var(--status-danger);
+  border-color: var(--danger-200);
+  background: var(--danger-50);
 }
 
 .body {
-  margin: var(--space-1) 0 var(--space-2) var(--space-4);
-  padding-left: var(--space-3);
-  border-left: var(--border-width) solid var(--border);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-medium);
+  border-left: 2px solid var(--accent-200);
+}
+
+.failed .body {
+  border-left-color: var(--danger-200);
 }
 
 .more {

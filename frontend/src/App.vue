@@ -12,14 +12,15 @@ import { useSessionStore } from './stores/session.js'
 import { useTaskStore } from './stores/task.js'
 import { useGlossaryStore } from './stores/glossary.js'
 import { useConversationsStore } from './stores/conversations.js'
-import { IconSpinner, IconFlag, IconCheck, IconX } from './icons/index.js'
+import { IconSpinner, IconFlag, IconCheck, IconX, IconSidebar } from './icons/index.js'
 
 const session = useSessionStore()
 const glossary = useGlossaryStore()
 const conversations = useConversationsStore()
 
-// 左栏默认展开（切换对话方便）；收起只影响布局
-const sideCollapsed = ref(false)
+// 左栏（会话列表）：宽屏默认展开，窄屏默认收起——窄屏展开会把对话挤没，
+// 而"先看到对话"比"先看到会话列表"重要。收起后由顶栏的开关按钮唤回。
+const sideCollapsed = ref(typeof window !== 'undefined' && window.innerWidth < 900)
 
 // 术语对照表随登录状态加载/清空（零术语纪律）：登录后拉一次，退出时清掉——
 // 换个人登录不该沿用上一个人的界面状态。
@@ -51,6 +52,10 @@ const statusView = computed(() => {
     return { show: true, label: '等待输入', cls: 'suspended', icon: IconFlag, spin: false }
   }
   if (status === 'terminal') {
+    // 用户自己停的：说"已取消"，别说"未能办成"——同一件事在界面上只能有一个说法
+    if (store.activeTurn?.cancelled) {
+      return { show: true, label: '已取消', cls: 'cancelled', icon: IconX, spin: false }
+    }
     const terminalStatus = store.terminalEvent?.status
     if (terminalStatus === 'done') {
       return { show: true, label: '已办成', cls: 'success', icon: IconCheck, spin: false }
@@ -128,11 +133,23 @@ onUnmounted(() => {
   <div class="shell">
     <a href="#main-content" class="skip-link">跳到主要内容</a>
     <header class="topbar" role="banner">
-      <div class="brand-area">
+      <div class="topbar-left">
+        <button
+          class="icon-btn"
+          type="button"
+          :title="sideCollapsed ? '展开会话列表' : '收起会话列表'"
+          :aria-label="sideCollapsed ? '展开会话列表' : '收起会话列表'"
+          :aria-expanded="!sideCollapsed"
+          @click="sideCollapsed = !sideCollapsed"
+        >
+          <IconSidebar :size="17" />
+        </button>
+        <span class="brand-mark" aria-hidden="true"><IconCheck :size="13" /></span>
         <h1 class="brand">校园教室代办</h1>
-        <p class="tagline">每一步都看得见依据 · 可解释可恢复</p>
+        <p class="tagline">每一步都看得见依据</p>
       </div>
-      <div class="topbar-actions">
+
+      <div class="topbar-center">
         <Transition name="fade">
           <div
             v-if="statusView.show"
@@ -163,9 +180,10 @@ onUnmounted(() => {
             <span class="conn-label">{{ connectionView.label }}</span>
           </div>
         </Transition>
-        <ThemeToggle :theme="theme" @toggle="toggleTheme" />
       </div>
-      <div class="top-right">
+
+      <div class="topbar-right">
+        <ThemeToggle :theme="theme" @toggle="toggleTheme" />
         <div v-if="session.isLoggedIn" class="who">
           <span class="role">{{ session.roleLabel }}</span>
           <span class="name">{{ session.displayName }}</span>
@@ -186,7 +204,7 @@ onUnmounted(() => {
       role="main"
       tabindex="-1"
     >
-      <ConversationList :collapsed="sideCollapsed" @toggle="sideCollapsed = !sideCollapsed" />
+      <ConversationList :collapsed="sideCollapsed" />
       <ChatPane />
     </main>
 
@@ -195,23 +213,81 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 全屏工作台（2026-09-27）：外壳占满视口、页面自身不滚动——
+   滚动只发生在消息区内部，输入框因此永远贴在手边。 */
 .shell {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-5) var(--space-6);
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .topbar {
+  flex-shrink: 0;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--space-5);
+  gap: var(--space-3);
+  height: 56px;
+  padding: 0 var(--space-4);
+  border-bottom: var(--border-width) solid var(--border);
+  background: var(--surface);
 }
 
-.brand-area {
+.topbar-left {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.topbar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: transparent;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--accent-gradient);
+  color: #ffffff;
+  box-shadow: var(--shadow-glow-soft);
+  flex-shrink: 0;
 }
 
 .brand {
@@ -221,14 +297,11 @@ onUnmounted(() => {
 }
 
 .tagline {
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-size: var(--text-xs);
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  padding-left: var(--space-3);
+  border-left: var(--border-width) solid var(--border);
+  white-space: nowrap;
 }
 
 .status-badge {
@@ -264,6 +337,13 @@ onUnmounted(() => {
   color: var(--danger-600);
   border-color: var(--danger-200);
   background: var(--danger-50);
+}
+
+/* 用户主动取消：中性灰（不是失败，也不该显得像出错了） */
+.status-badge.st-cancelled {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: var(--surface-2);
 }
 
 .status-spin {
@@ -349,12 +429,6 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-.top-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
 .who {
   display: flex;
   align-items: center;
@@ -393,34 +467,34 @@ onUnmounted(() => {
 }
 
 .views {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: var(--space-4);
-  align-items: start;
+  grid-template-columns: 268px minmax(0, 1fr);
+  overflow: hidden;
 }
 
-/* 左栏收起：只留一条窄边与展开按钮 */
+/* 收起 = 完全隐藏（不留窄边）：对话区因此能把宽度用足。
+   必须改成**单列**：若仍保留两列（0 + 1fr），左栏 display:none 后不再占轨道，
+   ChatPane 会被 auto-placement 放进 0 宽的第一列——对话区整列塌成 0。 */
 .views.side-collapsed {
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
-/* 平板：左栏收窄，给对话让位 */
-@media (max-width: 1024px) {
+/* 窄屏：左栏改为对话框上方的一条横向列表（展开时），收起则完全隐藏 */
+@media (max-width: 900px) {
   .views {
-    grid-template-columns: 200px minmax(0, 1fr);
-    gap: var(--space-3);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .views:not(.side-collapsed) {
+    grid-template-rows: auto minmax(0, 1fr);
   }
 }
 
-/* 移动端：单栏堆叠 */
 @media (max-width: 768px) {
-  .shell {
-    padding: var(--space-4) var(--space-4) var(--space-5);
-  }
-
   .topbar {
-    margin-bottom: var(--space-4);
-    flex-wrap: wrap;
+    padding: 0 var(--space-3);
     gap: var(--space-2);
   }
 
@@ -432,25 +506,20 @@ onUnmounted(() => {
     display: none;
   }
 
-  .views {
-    grid-template-columns: 1fr;
-    gap: var(--space-4);
+  .name {
+    display: none;
   }
 }
 
 /* 小屏手机：更紧凑 */
 @media (max-width: 480px) {
-  .shell {
-    padding: var(--space-3) var(--space-3) var(--space-4);
-  }
-
-  .topbar-actions {
-    gap: var(--space-2);
-  }
-
   .status-badge {
     padding: 3px 8px;
     font-size: 10px;
+  }
+
+  .conn-label {
+    display: none;
   }
 }
 </style>

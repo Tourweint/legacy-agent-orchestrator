@@ -4,6 +4,7 @@
 
 export { default as IconCheck } from './IconCheck.vue'
 export { default as IconX } from './IconX.vue'
+export { default as IconSidebar } from './IconSidebar.vue'
 export { default as IconFlag } from './IconFlag.vue'
 export { default as IconAlert } from './IconAlert.vue'
 export { default as IconChevronDown } from './IconChevronDown.vue'

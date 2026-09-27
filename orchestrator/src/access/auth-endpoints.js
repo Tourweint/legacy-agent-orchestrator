@@ -21,6 +21,37 @@ export const AUTH_ERROR_CODES = {
   BAD_CREDENTIALS: 4013, // 账号或密码不正确
 }
 
+/** 传输层失败的如实说明（kind 取值见 contact/http-transport.js）。 */
+const TRANSPORT_FAILURE_HINTS = {
+  timeout: '存量系统响应超时——它可能正卡在自身依赖上（如 Redis / 数据库），请检查存量系统是否正常',
+  disconnect: '无法连接存量系统——请确认它已启动',
+  unparseable: '存量系统返回了无法解析的响应',
+}
+
+/**
+ * 把接触层的登录失败**如实**翻成人话（2026-09-27 修正）。
+ *
+ * 判别依据（**别看 HTTP 状态码**，这两种情况它分不出来）：
+ *   · 存量系统说"用户或密码错误" → HTTP 200 + **业务码 401**；
+ *   · 它自己依赖挂掉 → 请求**挂住**，引擎侧落 `transportKind = timeout`（实测，不是业务码 500）。
+ * 旧实现把两者都翻成"账号或密码不正确"，于是服务端故障被说成用户输错了密码，
+ * 人会拿着正确密码反复试——2026-09-27 那次报障就是这么被误导的。
+ *
+ * 对外契约不变：失败仍是 `401 + 4013`（不给枚举探测的口子，见对外接口清单 §10），
+ * 变的只是消息——"你输错了"与"后台坏了"在界面上一眼可辨。
+ */
+function describeLoginFailure(err) {
+  if (err.businessCode === 401) return '账号或密码不正确'
+  if (typeof err.businessCode === 'number' && err.businessCode !== 200) {
+    return `登录失败：存量系统返回异常（业务码 ${err.businessCode}）——这不是账号密码问题，请检查存量系统及其依赖（Redis / 数据库）是否正常`
+  }
+  if (err.transportKind) {
+    const hint = TRANSPORT_FAILURE_HINTS[err.transportKind] ?? `与存量系统的通信失败（${err.transportKind}）`
+    return `登录失败：${hint}`
+  }
+  return `登录失败：${err.message}`
+}
+
 /** 从请求里解析引擎会话（Cookie 优先，其次 Bearer——供脚本与接口测试使用）。 */
 export function resolveSession(req, { sessionStore, sessionConstants }) {
   const token =
@@ -59,9 +90,8 @@ export async function handleAuthRoute({ req, res, route, deps }) {
         sendJson(res, 401, AUTH_ERROR_CODES.SESSION_EXPIRED, err.message)
         return true
       }
-      // 认证失败与"存量系统不可达"要分开：前者是用户的问题，后者不是
-      const message = /被拒/.test(err.message) ? '账号或密码不正确' : `登录失败：${err.message}`
-      sendJson(res, 401, AUTH_ERROR_CODES.BAD_CREDENTIALS, message)
+      // 认证失败与"存量系统故障"要分开：前者是用户的问题，后者不是——不能让人去改密码
+      sendJson(res, 401, AUTH_ERROR_CODES.BAD_CREDENTIALS, describeLoginFailure(err))
     }
     return true
   }

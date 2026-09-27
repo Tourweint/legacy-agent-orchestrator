@@ -1,13 +1,13 @@
 <script setup>
-// 左栏会话列表 —— 界面方案 §二。默认展开，只给一个收起按钮（收起后留一条窄边）。
-// 点一条历史会话即切回去（轮次快照来自 localStorage，见 stores/conversations.js）。
+// 左栏会话列表 —— 界面方案 §二。收起/展开统一由顶栏的开关按钮负责
+// （本组件不重复放第二个收起按钮）；点一条历史会话即切回去
+// （轮次快照来自 localStorage，见 stores/conversations.js）。
 
 import { computed } from 'vue'
 import { useConversationsStore } from '../stores/conversations.js'
 import { useTaskStore } from '../stores/task.js'
 
 defineProps({ collapsed: { type: Boolean, default: false } })
-const emit = defineEmits(['toggle'])
 
 const convs = useConversationsStore()
 const task = useTaskStore()
@@ -55,14 +55,6 @@ function startNew() {
       <button v-if="!collapsed" class="btn btn-ghost btn-sm new" @click="startNew">
         ＋ 新对话
       </button>
-      <button
-        class="toggle"
-        :title="collapsed ? '展开会话列表' : '收起会话列表'"
-        :aria-label="collapsed ? '展开会话列表' : '收起会话列表'"
-        @click="emit('toggle')"
-      >
-        {{ collapsed ? '»' : '«' }}
-      </button>
     </div>
 
     <nav v-if="!collapsed" class="list">
@@ -86,13 +78,22 @@ function startNew() {
 </template>
 
 <style scoped>
+/* 全屏工作台（2026-09-27）：左栏占满整列高度、自己滚动；收起时整列隐藏
+   （不留窄边——展开入口在顶栏的开关按钮上）。 */
 .side {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  position: sticky;
-  top: var(--space-5);
-  max-height: calc(100vh - var(--space-6));
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+  background: var(--bg); /* 比对话区浅一档：一眼分得清"这是列表、那是对话" */
+  border-right: var(--border-width) solid var(--border);
+  overflow: hidden;
+}
+
+.side.collapsed {
+  display: none;
 }
 
 .head {
@@ -106,34 +107,24 @@ function startNew() {
   justify-content: flex-start;
 }
 
-.toggle {
-  flex-shrink: 0;
-  background: transparent;
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-small);
-  color: var(--text-faint);
-  width: 26px;
-  height: 26px;
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-standard);
-}
-
-.toggle:hover {
-  color: var(--text);
-}
-
-.collapsed .head {
-  justify-content: center;
-}
-
 .list {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   overflow-y: auto;
-  padding-right: 2px;
+  padding-right: 6px;
+}
+
+/* 窄屏：左栏变成对话框上方的一条横向列表，限高以免把对话挤出屏幕 */
+@media (max-width: 900px) {
+  .side {
+    height: auto;
+    max-height: 38vh;
+    border-right: none;
+    border-bottom: var(--border-width) solid var(--border);
+  }
 }
 
 .group-label {
@@ -157,6 +148,7 @@ function startNew() {
   color: var(--text-muted);
   cursor: pointer;
   text-align: left;
+  position: relative;
   transition: background-color var(--dur-fast) var(--ease-standard);
 }
 
@@ -165,9 +157,21 @@ function startNew() {
   color: var(--text);
 }
 
+/* 活跃会话：左侧 3px 指示条 + 淡蓝底，一眼看出当前在哪段对话 */
 .item.active {
   background: var(--accent-weak);
   color: var(--text);
+}
+
+.item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-500);
 }
 
 .dot {
@@ -180,15 +184,18 @@ function startNew() {
 
 .dot.is-done {
   background: var(--status-success);
+  box-shadow: 0 0 0 3px var(--success-100);
 }
 
 .dot.is-failed {
   background: var(--status-danger);
+  box-shadow: 0 0 0 3px var(--danger-100);
 }
 
 .dot.is-unsure,
 .dot.is-running {
   background: var(--status-uncertain);
+  box-shadow: 0 0 0 3px var(--warning-100);
 }
 
 .title {

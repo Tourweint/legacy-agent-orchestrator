@@ -40,7 +40,7 @@ test('办成：判定与调用各自只报计数，折叠块默认收起', () =>
     { taskStatus: 'terminal' },
   )
 
-  assert.equal(t.steps, 6)
+  assert.equal(t.steps, 5, '步骤数不含结论事件（terminal 归答案卡）')
   const texts = t.lines.map((l) => l.text)
   assert.ok(texts.includes('判定 3 项全部通过'), '成功的判定只报计数')
   assert.ok(texts.includes('调用 1 次，全部成功'))
@@ -70,8 +70,9 @@ test('办不成：展开失败链（汇总行 + 失败行 + 理解行），其�
 
   const focusTexts = t.lines.filter((l) => l.focus).map((l) => l.text)
   assert.ok(focusTexts.includes('识别为「借教室」· 教室=数智楼123 · 日期=明天 · 时间=下午两点到四点'))
-  assert.ok(focusTexts.includes('判定 5 项，其中 1 项没通过'), '汇总行要在——它是"为什么没办成"的来处')
+  assert.ok(focusTexts.includes('判定 5 项，其中 1 项没通过'), '汇总行要在——它是"为什么是这个结果"的来处')
   assert.ok(focusTexts.includes('这个时段是空的'), '失败项逐条要列出来')
+  assert.equal(t.failCount, 1, '失败计数只数逐条判定项，不把汇总行算成第二项')
   assert.equal(t.defaultMode, 'partial', '办不成时部分展开')
   assert.ok(t.hiddenCount > 0, '其余要点仍收起')
 })
@@ -81,6 +82,12 @@ test('运行中与挂起全展开；终态按失败链决定', () => {
   assert.equal(defaultModeFor('suspended', 0), 'full')
   assert.equal(defaultModeFor('terminal', 0), 'collapsed')
   assert.equal(defaultModeFor('terminal', 2), 'partial')
+})
+
+test('办成了就收起过程：查询的"不可用"答复也是办成，不该主动摊开依据', () => {
+  assert.equal(defaultModeFor('terminal', 2, 'DONE'), 'collapsed')
+  assert.equal(defaultModeFor('terminal', 2, 'REJECTED'), 'partial', '没办成才展开失败链')
+  assert.equal(defaultModeFor('terminal', 1, 'UNRESOLVED'), 'partial', '待确认同样要看依据')
 })
 
 test('不适用（not-applicable）不算失败，不进失败链', () => {
@@ -117,13 +124,29 @@ test('步数与耗时来自事件自身（不依赖 phase-start/phase-end）', (
   assert.equal(formatDuration(0), '0 秒')
 })
 
-test('明细（L3）原样保留，不丢任何一条证据', () => {
+test('明细（L3）保留全部**过程**证据，不丢任何一条', () => {
   const events = [UNDERSTAND(1), ev({ seq: 2, phase: 'P6', type: 'audit', status: 'done', text: '审计' })]
   const t = buildThinking(events, { taskStatus: 'terminal' })
   assert.equal(t.details.length, 2)
   assert.deepEqual(
     t.details.map((e) => e.seq),
     [1, 2],
+  )
+})
+
+test('结论不进思考过程：terminal 与 P2 之后的 decision 都不是"步骤"', () => {
+  const t = buildThinking(
+    [
+      UNDERSTAND(1),
+      ev({ seq: 2, phase: 'P2', type: 'decision', status: 'done', text: '该教室在这个时段可以使用。' }),
+      ev({ seq: 3, phase: 'P6', type: 'terminal', status: 'done', text: '该教室在这个时段可以使用。' }),
+    ],
+    { taskStatus: 'terminal' },
+  )
+  assert.equal(t.steps, 1, '只剩"识别为…"这一步；答案是答案，不是过程')
+  assert.deepEqual(
+    t.details.map((e) => e.seq),
+    [1],
   )
 })
 
