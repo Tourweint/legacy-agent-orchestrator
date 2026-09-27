@@ -1,4 +1,4 @@
-﻿// 混沌实验执行器 —— 第 09 章 D0–D6（D7 可选：样本量未定，留档说明）。
+// 混沌实验执行器 —— 第 09 章 D0–D6（D7 可选：样本量未定，留档说明）。
 //
 // 规格（§五/§六/§七/§八）：
 //   · 结构化任务路径（无 LLM）——失败必来自注入而非模型随机性
@@ -21,7 +21,6 @@ import { JudgmentEngine } from '../src/judgment/judgment-engine.js'
 import { TaskRunner } from '../src/orchestration/task-runner.js'
 import { EvidenceChain } from '../src/evidence/evidence-chain.js'
 import { ChaosController } from '../src/chaos/chaos-controller.js'
-import { UserTokenStore } from '../src/contact/user-token-store.js'
 import { seatRowAttribution } from '../src/judgment/predicates.js'
 
 // ---- 装配 ----
@@ -32,26 +31,15 @@ const chaos = new ChaosController({ configStore: store })
 const transport = new HttpTransport({ baseUrl, onOutbound: (info) => chaos.onOutbound(info) })
 const adapters = new ProtocolAdapters({ configStore: store })
 const pool = new IdentityPool({ configStore: store, transport, adapters, constants })
-// 登录会话权限改造后，写操作需要用户令牌注册表——实验自行装配并登录
-const userTokenStore = new UserTokenStore({ configStore: store, transport, adapters, constants })
-await userTokenStore.login({ username: '233', password: '233' })
-await userTokenStore.login({ username: 'abc', password: 'abc' })
-const directGateway = new ContactGateway({ configStore: store, transport, identityPool: pool, adapters, userTokenStore })
+const directGateway = new ContactGateway({ configStore: store, transport, identityPool: pool, adapters })
 
 function newRun(label) {
   const taskId = `EXP-${label}-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`
   const chain = new EvidenceChain({ taskId, evidenceConstants: constants.evidence })
-  // 登录会话权限改造后，写操作要求发起人身份（initiator）——实验以教师 233 为发起人
-  const gateway = directGateway.forTask(chain, { user: { username: '233', role: 'TEACHER' } })
+  const gateway = directGateway.forTask(chain)
   const judgment = new JudgmentEngine({ configStore: store, gateway, evidenceChain: chain })
-  const runner = new TaskRunner({ configStore: store, gateway, judgmentEngine: judgment, evidenceChain: chain, user: { username: '233', role: 'TEACHER' } })
+  const runner = new TaskRunner({ configStore: store, gateway, judgmentEngine: judgment, evidenceChain: chain })
   return { taskId, chain, runner, gateway }
-}
-
-// 为预置/清理等旁路调用创建带指定发起人身份的网关（写操作必须有 initiator）
-function gatewayForUser(username, role) {
-  const chain = new EvidenceChain({ taskId: `EXP-side-${Date.now()}`, evidenceConstants: constants.evidence })
-  return directGateway.forTask(chain, { user: { username, role } })
 }
 
 // ---- 工具 ----
@@ -104,7 +92,7 @@ async function countActiveByBusinessKey(room, slot) {
 async function cleanupClassroomRows(rows) {
   for (const row of rows) {
     if (row.status !== 'ACTIVE') continue
-    await gatewayForUser('233', 'TEACHER').call('edu.reservation.cancel', { recordId: row.recordId }, { phase: 'P5' })
+    await directGateway.call('edu.reservation.cancel', { recordId: row.recordId }, { initiatorIdentity: 'TEACHER', phase: 'P5' })
   }
 }
 
@@ -247,10 +235,10 @@ async function expD3B() {
   const seat = (seatList.json?.data?.seatVOS ?? []).find((s) => s.status === 'ENABLED')
   if (!seat) throw new Error('无可用座位（D3-B 预置失败）')
   const slot = beijingSlot(0, 15, 16)
-  const booking = await gatewayForUser('abc', 'STUDENT').call(
+  const booking = await directGateway.call(
     'edu.reservation.seat.create',
     { seatId: seat.id, start: slot.start, end: slot.end, reason: 'D3-B 他人占用预置' },
-    { phase: 'P2' },
+    { initiatorIdentity: 'STUDENT', phase: 'P2' },
   )
   const mid = await countActiveByBusinessKey(ROOMS[222], slot)
   chaos.arm({ injects: [{ interface: 'edu.reservation.classroom.create', nth: 1, fault: { type: 'T6', businessCode: 409, httpStatus: 200 } }] })

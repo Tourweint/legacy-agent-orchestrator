@@ -34,18 +34,6 @@ defineProps({
   padding: 3px 0;
   font-size: var(--text-xs);
   line-height: 1.6;
-  animation: line-in 0.3s var(--ease-decelerate) both;
-}
-
-@keyframes line-in {
-  from {
-    opacity: 0;
-    transform: translateX(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
 }
 
 .phase {

@@ -58,7 +58,6 @@ function onKeydown(e) {
     />
     <button
       class="btn btn-primary"
-      :class="{ 'btn-pulse': modelValue.trim() && !pending && !disabled }"
       :disabled="!modelValue.trim() || pending || disabled"
       aria-label="发送"
       @click="emit('send')"
@@ -105,28 +104,6 @@ function onKeydown(e) {
 .composer .btn {
   flex-shrink: 0;
   border-radius: var(--radius-small);
-  position: relative;
-  overflow: hidden;
-}
-
-/* 有输入时的 pulse 动画：微妙地提示用户"可以发送了" */
-.btn-pulse {
-  animation: btn-pulse 2s ease-in-out infinite;
-}
-
-@keyframes btn-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(99, 102, 241, 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .btn-pulse {
-    animation: none;
-  }
 }
 
 @media (max-width: 480px) {
