@@ -79,10 +79,11 @@ function onKeydown(e) {
       class="btn btn-primary"
       :disabled="!modelValue.trim() || disabled"
       :aria-label="actionLabel"
+      :title="actionLabel"
       @click="emit('send')"
     >
       <IconSend :size="14" />
-      {{ actionLabel }}
+      <span class="btn-label">{{ actionLabel }}</span>
     </button>
   </div>
 </template>
@@ -127,7 +128,8 @@ function onKeydown(e) {
 
 /* 空态中央宽输入框（hero）：不扁平——更宽、圆角更大、内边距更厚、输入字号更大。
    宽度按视口百分比自适应（约 50%，DeepSeek 神似；浏览器窄了自动变窄），
-   上限 680px 防超宽屏拉散。 */
+   上限 680px 防超宽屏拉散。发送按钮做成**右下角小圆**（2026-09-27 用户口径）：
+   只留发送图标、文字隐藏，圆形 40px、按钮在 flex 最右。 */
 .composer.hero {
   width: min(50vw, 680px);
   max-width: 100%;
@@ -142,9 +144,21 @@ function onKeydown(e) {
 }
 
 .composer.hero .btn {
-  padding: 10px 18px;
-  font-size: var(--text-md);
-  border-radius: var(--radius-medium);
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.composer.hero .btn .btn-label {
+  display: none;
+}
+
+.composer.hero .btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -165,6 +179,12 @@ function onKeydown(e) {
   .composer.hero {
     width: 100%;
     padding: 12px 10px;
+  }
+
+  /* hero 的小圆按钮在窄屏不拉成整条：保持圆形、靠右下角 */
+  .composer.hero .btn {
+    width: 40px;
+    align-self: flex-end;
   }
 }
 </style>

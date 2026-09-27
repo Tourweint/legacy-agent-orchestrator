@@ -2,12 +2,11 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTaskStore } from '../stores/task.js'
 import { useSessionStore } from '../stores/session.js'
-import EmptyState from './EmptyState.vue'
 import ErrorState from './ErrorState.vue'
 import Composer from './Composer.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import AnswerBubble from './AnswerBubble.vue'
-import { IconCheck } from '../icons/index.js'
+import { IconCheck, IconSearch } from '../icons/index.js'
 
 const store = useTaskStore()
 const session = useSessionStore()
@@ -199,11 +198,15 @@ watch(() => store.activeTurnId, () => {
       aria-label="对话消息"
       @scroll.passive="onScroll"
     >
-      <!-- 空态 = DeepSeek 神似的中央构图（2026-09-27 用户口径）：
-           问候 → 中央宽输入框 → 输入框下方示例。一旦发出第一条消息整体让位给消息流。 -->
+      <!-- 空态 = DeepSeek 神似的中央构图（2026-09-27 用户口径，第二轮精简）：
+           放大镜 + 标题一行 → 中央宽输入框（发送按钮=右下角小圆）→ 输入框下方示例。
+           描述/示例标签都不显示（提示词已在输入框里），一旦发出第一条消息整体让位给消息流。 -->
       <template v-if="!store.hasAnyTurn">
         <div class="hero">
-          <EmptyState title="预约教室从这里开始" description="用一句话说明要办的事" />
+          <div class="hero-heading">
+            <IconSearch :size="22" :stroke-width="1.5" aria-hidden="true" />
+            <h2 class="hero-title">预约教室，从这里开始</h2>
+          </div>
 
           <Composer
             ref="heroComposerRef"
@@ -219,7 +222,6 @@ watch(() => store.activeTurnId, () => {
 
           <!-- 快捷发送：空态时放在中央输入框下方（用户口径：第一次给示例，后续不再重复） -->
           <div class="hero-chips">
-            <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
             <div class="chips">
               <button
                 v-for="text in examples"
@@ -360,16 +362,31 @@ watch(() => store.activeTurnId, () => {
   padding: var(--space-4) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-5);
 }
 
-/* 空态中央构图（hero）：问候 → 中央宽输入框 → 示例 chips，整组垂直+水平居中。
-   hero 在 messages（flex column）里靠 margin auto 占中；发消息后让位给消息流。 */
+/* 空态中央构图（hero）：放大镜+标题一行 → 中央宽输入框 → 示例 chips。
+   hero 在 messages（flex column）里靠 margin 顶部留白 + 底部自适应占位——垂直重心略偏上
+   （用户口径"太居中了"：不再钉死在屏幕正中，接近 DeepSeek 的构图上移手感）；
+   水平仍居中。发消息后让位给消息流。 */
 .hero {
-  margin: auto;
+  margin: 12vh auto auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-4);
   width: 100%;
   padding: var(--space-4);
+}
+
+.hero-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--accent-500);
+}
+
+.hero-title {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--text);
 }
 
 .hero-chips {
@@ -507,15 +524,6 @@ watch(() => store.activeTurnId, () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.capability {
-  margin-bottom: var(--space-3);
-}
-
-.capability-label {
-  font-size: 11px;
-  margin-bottom: var(--space-2);
 }
 
 .chips {
