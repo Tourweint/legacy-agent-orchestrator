@@ -15,7 +15,9 @@ defineProps({
     </div>
     <div v-if="title" class="empty-title">{{ title }}</div>
     <div v-if="description" class="empty-desc">{{ description }}</div>
-    <slot />
+    <div v-if="$slots.default" class="empty-actions">
+      <slot />
+    </div>
   </div>
 </template>
 
@@ -53,5 +55,14 @@ defineProps({
   color: var(--text-muted);
   max-width: 340px;
   line-height: var(--leading-relaxed);
+}
+
+.empty-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  width: 100%;
 }
 </style>

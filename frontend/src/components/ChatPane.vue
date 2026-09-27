@@ -7,7 +7,7 @@ import ErrorState from './ErrorState.vue'
 import Composer from './Composer.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import AnswerBubble from './AnswerBubble.vue'
-import { IconCheck } from '../icons/index.js'
+import { IconCheck, IconRefresh } from '../icons/index.js'
 
 const store = useTaskStore()
 const session = useSessionStore()
@@ -17,20 +17,85 @@ const composerRef = ref(null)
 
 // 能力入口（示例话术）：一点即发。为什么要有它——评委不该为了看"能干什么"自己先想句子；
 // 每条话术都是**当前角色真的能办成**的事（不是宣传语），按角色只显示办得到的那些。
-const TEACHER_EXAMPLES = [
+// 2026-09-27 P2 升级：从静态 4 条改为动态推荐——基础池 + 上下文感知 + 换一批。
+const TEACHER_POOL = [
   '帮我借下周三下午数智楼123',
   '查一下明天上午数智楼123有没有空',
   '我订了哪些教室',
   '把数智楼123那间退了',
+  '帮我借10月1日下午两点到四点的数智楼222',
+  '查一下后天下午哪些教室有空',
+  '我下周三的预约改到周五',
+  '帮我借明天上午的会议室，开班会用',
+  '查一下数智楼222本周的预约情况',
+  '取消我所有下周的预约',
 ]
 // 学生通道：座位预约**只能提前 24 小时**（2026-09-26 实测约束），
 // 所以示例用"今天下午"而不是"明天"；座位号形如"2-3"（行-列），不是"A3"。
-const STUDENT_EXAMPLES = [
+const STUDENT_POOL = [
   '帮我占今天下午数智楼123的2-3号座位',
   '查一下明天上午数智楼123有没有空',
   '我订了哪些教室',
+  '把数智楼123的座位退了',
+  '帮我占今天晚上图书馆的1-1号座位',
+  '查一下今天下午哪些座位还能占',
+  '我今天的座位改到明天上午',
+  '帮我占明天下午数智楼222的3-5号座位',
 ]
-const examples = computed(() => (session.role === 'STUDENT' ? STUDENT_EXAMPLES : TEACHER_EXAMPLES))
+
+// 当前显示的 4 条话术（可换一批）
+const visibleExamples = ref([])
+const exampleSeed = ref(0)
+
+function pickExamples(pool, seed) {
+  const shuffled = [...pool]
+  // 简单的确定性洗牌（基于 seed），保证同一种子结果一致
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = (seed * 7 + i * 13) % (i + 1)
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  return shuffled.slice(0, 4)
+}
+
+function refreshExamples() {
+  exampleSeed.value += 1
+  const pool = session.role === 'STUDENT' ? STUDENT_POOL : TEACHER_POOL
+  visibleExamples.value = pickExamples(pool, exampleSeed.value)
+}
+
+// 初始化话术
+refreshExamples()
+
+// 上下文感知推荐：如果上一轮是查询类，优先推荐"接着办"的话术
+const contextAwareExamples = computed(() => {
+  const lastTurn = store.turns[store.turns.length - 1]
+  if (!lastTurn) return visibleExamples.value
+
+  const lastIntent = lastTurn.intentId
+  const result = lastTurn.result?.terminal
+
+  // 如果刚查完空闲且成功，推荐"那帮我借了吧"
+  if (lastIntent === 'query-classroom-availability' && result === 'DONE') {
+    const followUp = ['那帮我借了吧', ...visibleExamples.value.filter((e) => !e.includes('借'))]
+    return followUp.slice(0, 4)
+  }
+
+  // 如果刚办完借教室，推荐"查一下我的预约"或"改期"
+  if (lastIntent === 'borrow-classroom' && result === 'DONE') {
+    const followUp = ['查一下我的预约', '把这个预约改到下周', ...visibleExamples.value]
+    return [...new Set(followUp)].slice(0, 4)
+  }
+
+  return visibleExamples.value
+})
+
+const examples = computed(() => contextAwareExamples.value)
+
+// 调试入口默认隐藏，仅在 URL 带 ?debug=1 时显示（生产界面保持纯净）
+const debugMode = computed(() => {
+  if (typeof window === 'undefined') return false
+  return new URLSearchParams(window.location.search).get('debug') === '1'
+})
 
 function useExample(text) {
   // 运行中/挂起点能力入口不接管（运行中让 send() 按改口语义处理，挂起时用户正在答追问）；
@@ -39,6 +104,10 @@ function useExample(text) {
   if (pending.value || suspended.value) return
   draft.value = text
   send()
+}
+
+function focusComposer() {
+  composerRef.value?.focus()
 }
 
 // 追问属于**核心输出**（用户必须当场看到问题才答得上），仍然逐条显示；
@@ -297,7 +366,30 @@ watch(() => store.activeTurnId, () => {
         </div>
       </div>
 
-      <ErrorState v-if="store.error" title="请求失败" :message="store.error" :show-retry="false" />
+      <!-- 办理中进度条：替代快捷话术区域，让用户知道"它正在干什么" -->
+      <div v-if="pending" class="progress-row" role="status" aria-live="polite">
+        <div class="progress-info">
+          <span class="progress-spinner" aria-hidden="true"></span>
+          <span class="progress-text">正在办理中<span class="progress-dots">...</span></span>
+          <span v-if="activeStepCount > 0" class="progress-steps muted">已完成 {{ activeStepCount }} 步</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+        </div>
+      </div>
+
+      <ErrorState
+        v-if="store.error"
+        title="请求失败"
+        :message="store.error"
+        :show-retry="true"
+        retry-text="重试"
+        :suggestions="errorSuggestions"
+        help-text="查看使用教程"
+        help-href="https://github.com/Tourweint/legacy-agent-orchestrator#readme"
+        @retry="handleErrorRetry"
+        @suggest="handleErrorSuggest"
+      />
 
       <Composer
         ref="composerRef"
@@ -333,6 +425,11 @@ watch(() => store.activeTurnId, () => {
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-5);
+  /* 性能优化：限制重绘重排范围，滚动时只影响容器内部 */
+  contain: layout paint;
+  /* 平滑滚动 */
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
 
 .dock {
@@ -469,9 +566,136 @@ watch(() => store.activeTurnId, () => {
   margin-bottom: var(--space-3);
 }
 
+.capability-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
 .capability-label {
   font-size: 11px;
+}
+
+.refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+
+.refresh-btn:hover {
+  border-color: var(--accent-300);
+  color: var(--accent-600);
+  background: var(--accent-50);
+}
+
+.refresh-btn:active {
+  transform: scale(0.95);
+}
+
+.refresh-btn svg {
+  transition: transform var(--dur-base) var(--ease-standard);
+}
+
+.refresh-btn:hover svg {
+  transform: rotate(180deg);
+}
+
+/* 办理中进度条 */
+.progress-row {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+}
+
+.progress-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+
+.progress-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent-200);
+  border-top-color: var(--accent-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.progress-text {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.progress-dots {
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: dots-blink 1.4s steps(4, end) infinite;
+}
+
+@keyframes dots-blink {
+  0% { content: ''; opacity: 0; }
+  25% { content: '.'; opacity: 1; }
+  50% { content: '..'; opacity: 1; }
+  75% { content: '...'; opacity: 1; }
+  100% { content: ''; opacity: 0; }
+}
+
+.progress-steps {
+  font-size: var(--text-xs);
+  margin-left: auto;
+}
+
+.progress-bar {
+  height: 4px;
+  background: var(--surface);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: var(--radius-pill);
+  transition: width 0.4s var(--ease-decelerate);
+  position: relative;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .chips {
@@ -485,20 +709,35 @@ watch(() => store.activeTurnId, () => {
   color: var(--accent);
   border: var(--border-width) solid transparent;
   border-radius: 999px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: border-color var(--dur-fast) ease;
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
 }
 
 .chip:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--accent-400);
+  background: var(--accent-100);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.chip:active:not(:disabled) {
+  transform: translateY(0) scale(0.95);
+  box-shadow: var(--shadow-xs);
 }
 
 .chip:disabled {
   opacity: 0.5;
   cursor: default;
+  transform: none;
+  box-shadow: none;
 }
 
 /* ========== 响应式 ========== */
@@ -508,6 +747,14 @@ watch(() => store.activeTurnId, () => {
   .dock {
     padding-left: var(--space-4);
     padding-right: var(--space-4);
+  }
+
+  .empty-state {
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .empty-title {
+    font-size: var(--text-base);
   }
 }
 
@@ -519,6 +766,14 @@ watch(() => store.activeTurnId, () => {
 
   .stop-hint {
     display: none;
+  }
+
+  .empty-example-card {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .progress-row {
+    padding: var(--space-2);
   }
 }
 </style>

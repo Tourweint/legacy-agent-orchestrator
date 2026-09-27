@@ -181,12 +181,20 @@ function startNew() {
   cursor: pointer;
   text-align: left;
   position: relative;
-  transition: background-color var(--dur-fast) var(--ease-standard);
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
 }
 
 .item:hover {
   background: var(--surface-2);
   color: var(--text);
+  transform: translateX(2px);
+}
+
+.item:active {
+  transform: translateX(1px) scale(0.99);
 }
 
 /* 活跃会话：左侧 3px 指示条 + 淡蓝底，一眼看出当前在哪段对话 */

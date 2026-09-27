@@ -78,7 +78,7 @@ function toggle() {
 </script>
 
 <template>
-  <div v-if="thinking.steps > 0" class="thinking" :class="{ running, failed: hasFailures }">
+  <div v-if="thinking.steps > 0" class="thinking animate-item-in" :class="{ running, failed: hasFailures }">
     <button class="head" :aria-expanded="expanded" @click="toggle">
       <span class="chev" aria-hidden="true">
         <IconChevronDown v-if="expanded" :size="14" />
@@ -88,18 +88,20 @@ function toggle() {
       <span v-if="running" class="pulse-dot" aria-hidden="true"></span>
     </button>
 
-    <div v-show="expanded" class="body">
-      <ThinkingLine v-for="l in visibleLines" :key="`${l.phase}-${l.seq ?? l.text}`" :line="l" />
+    <div class="body-wrapper" :class="{ expanded }">
+      <div class="body-inner">
+        <ThinkingLine v-for="l in visibleLines" :key="`${l.phase}-${l.seq ?? l.text}`" :line="l" />
 
-      <button v-if="!fullView && thinking.hiddenCount > 0" class="more" @click="showAll = true">
-        其余 {{ thinking.hiddenCount }} 步
-      </button>
+        <button v-if="!fullView && thinking.hiddenCount > 0" class="more" @click="showAll = true">
+          其余 {{ thinking.hiddenCount }} 步
+        </button>
 
-      <button v-if="!showDetails" class="more" @click="showDetails = true">
-        查看完整留痕（{{ thinking.details.length }} 条）
-      </button>
-      <div v-else class="details">
-        <TrajectoryItem v-for="e in thinking.details" :key="e.seq" :event="e" />
+        <button v-if="!showDetails" class="more" @click="showDetails = true">
+          查看完整留痕（{{ thinking.details.length }} 条）
+        </button>
+        <div v-else class="details">
+          <TrajectoryItem v-for="e in thinking.details" :key="e.seq" :event="e" />
+        </div>
       </div>
     </div>
   </div>
@@ -143,6 +145,11 @@ function toggle() {
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.expanded .chev {
+  transform: rotate(90deg);
 }
 
 .title {
