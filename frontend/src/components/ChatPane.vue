@@ -127,12 +127,6 @@ function cancelTask() {
   store.cancel()
 }
 
-/** 另起一段对话：轮次与记忆都从头开始。 */
-function newConversation() {
-  store.newConversation()
-  draft.value = ''
-}
-
 function handleKeydown(e) {
   // Ctrl/Cmd + Enter：发送
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -190,13 +184,6 @@ watch(() => store.activeTurnId, () => {
 
 <template>
   <section class="chat" aria-label="对话区域">
-    <div class="pane-head">
-      <div class="pane-title">对话</div>
-      <button v-if="store.hasAnyTurn" class="btn btn-ghost btn-sm" @click="newConversation">
-        新对话
-      </button>
-    </div>
-
     <div
       ref="listEl"
       class="messages"
@@ -340,24 +327,6 @@ watch(() => store.activeTurnId, () => {
   min-height: 0;
   min-width: 0;
   background: var(--surface);
-}
-
-.pane-head {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  height: 46px;
-  padding: 0 max(var(--space-5), calc((100% - 820px) / 2));
-  border-bottom: var(--border-width) solid var(--border);
-}
-
-.pane-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
 }
 
 .messages {
@@ -551,7 +520,6 @@ watch(() => store.activeTurnId, () => {
 /* ========== 响应式 ========== */
 
 @media (max-width: 900px) {
-  .pane-head,
   .messages,
   .dock {
     padding-left: var(--space-4);

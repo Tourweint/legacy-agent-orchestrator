@@ -3,7 +3,7 @@
 // 三层信息的中间一层：默认收起（**办不成时部分展开失败链**），点开看要点，再点一层才是完整留痕。
 // 归并规则全部在 useThinking.js（纯函数、有单测）；这里只管展开/收起与排版，不新造任何文案。
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { buildThinking, formatDuration } from '../composables/useThinking.js'
 import ThinkingLine from './ThinkingLine.vue'
 import TrajectoryItem from './TrajectoryItem.vue'
@@ -27,6 +27,16 @@ const thinking = computed(() =>
 const manual = ref(null)
 const showAll = ref(false)
 const showDetails = ref(false)
+
+// 终态一到就**强制回到默认展开态**（办成→收起、没办成→部分展开失败链）：
+// 运行中"思考"随事件流慢慢展开，**结束后必须自动收起来**（2026-09-27 用户口径）——
+// 不沿用运行中遗留的手动展开状态（那会让终态看起来"收不起来"）。
+watch(
+  () => props.status,
+  (st, prev) => {
+    if (st === 'terminal' && prev !== 'terminal') manual.value = null
+  },
+)
 
 const expanded = computed(() =>
   manual.value === null ? thinking.value.defaultMode !== 'collapsed' : manual.value,
@@ -71,8 +81,8 @@ function toggle() {
   <div v-if="thinking.steps > 0" class="thinking" :class="{ running, failed: hasFailures }">
     <button class="head" :aria-expanded="expanded" @click="toggle">
       <span class="chev" aria-hidden="true">
-        <IconChevronDown v-if="expanded" :size="12" />
-        <IconChevronRight v-else :size="12" />
+        <IconChevronDown v-if="expanded" :size="14" />
+        <IconChevronRight v-else :size="14" />
       </span>
       <span class="title">{{ title }}</span>
       <span v-if="running" class="pulse-dot" aria-hidden="true"></span>
@@ -96,8 +106,10 @@ function toggle() {
 </template>
 
 <style scoped>
+/* 思考折叠块：与下方答案贴得近（用户口径：间距不要太大）；
+   外层统一淡灰半透明，运行中/失败**都不改外层颜色**——红色只允许出现在内部失败行。 */
 .thinking {
-  margin: var(--space-2) 0;
+  margin: 0 0 4px;
 }
 
 .head {
@@ -109,14 +121,14 @@ function toggle() {
   padding: 2px 0;
   border-radius: 0;
   cursor: pointer;
-  color: var(--text-faint);
-  font-size: var(--text-xs);
+  color: rgba(107, 114, 128, 0.55);
+  font-size: var(--text-base);
   font-family: inherit;
   transition: color var(--dur-fast) var(--ease-standard);
 }
 
 .head:hover {
-  color: var(--text-muted);
+  color: rgba(107, 114, 128, 0.85);
 }
 
 .head:focus-visible {
@@ -135,16 +147,8 @@ function toggle() {
   font-weight: var(--weight-medium);
 }
 
-.running .head {
-  color: var(--accent);
-}
-
-.failed .head {
-  color: var(--status-danger);
-}
-
 .body {
-  margin: var(--space-2) 0 var(--space-3);
+  margin: var(--space-1) 0 var(--space-2);
   padding: 0 0 0 var(--space-5);
   background: transparent;
   border-radius: 0;

@@ -4,10 +4,12 @@
 // 口径（2026-09-27）：答案**用大字给出**，且**只出现一次**——思考过程里不再重复结论
 // （见 composables/useThinking.js 的 isAnswerEvent）。
 // 结论文案来自引擎（result.conclusion / terminal 事件），本组件不新造句子：只把同一段文本
-// 分成两层展示——主答话（用户要的答案）与"推算依据"（过程性说明，小字）。
+// 分层展示——主答话（用户要的答案）。
+// 2026-09-27（第二次）：顶部"已办成 / N 步"徽章行移除（用户口径：外部只留最重要的结果，
+// 步数等信息全部收进"思考"模块——见 docs/变更记录/2026-09-27-思考折叠回归与移除理解卡.md
+// 之后的调整记录）。
 
 import { computed } from 'vue'
-import { IconCheck, IconX, IconFlag } from '../icons/index.js'
 
 const props = defineProps({
   turn: { type: Object, required: true },
@@ -28,8 +30,6 @@ const kind = computed(() => {
   return 'failed'
 })
 
-const LABELS = { done: '已办成', failed: '没能办成', unsure: '结果待确认', cancelled: '已取消' }
-
 const conclusion = computed(() => result.value?.conclusion ?? terminalEvent.value?.text ?? '')
 
 /**
@@ -48,8 +48,6 @@ const parsed = computed(() => {
   }
 })
 
-const steps = computed(() => result.value?.steps ?? null)
-
 /**
  * 结构化渲染（2026-09-27）：引擎侧列表类结论已是多行（`1. …\n2. …`），
  * 这里按行拆成块级段落——换行不会再被折叠成"摞在一起"的一行；
@@ -66,16 +64,6 @@ const isItem = (line) => /^\d+\.\s/.test(line)
 
 <template>
   <div v-if="kind" class="answer" :class="'is-' + kind">
-    <div class="head">
-      <span class="mark" aria-hidden="true">
-        <IconCheck v-if="kind === 'done'" :size="14" class="ok" />
-        <IconX v-else-if="kind === 'failed'" :size="14" class="bad" />
-        <IconFlag v-else :size="14" class="warn" />
-      </span>
-      <span class="label">{{ LABELS[kind] }}</span>
-      <span v-if="steps" class="steps mono">{{ steps }} 步</span>
-    </div>
-
     <template v-for="(line, i) in paragraphs" :key="i">
       <p class="text" :class="{ item: isItem(line) }">{{ line }}</p>
     </template>
@@ -84,68 +72,10 @@ const isItem = (line) => /^\d+\.\s/.test(line)
 
 <style scoped>
 .answer {
-  margin: var(--space-4) 0 var(--space-2);
+  margin: var(--space-2) 0 var(--space-2);
   padding: 0;
 }
 
-.head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
-
-.mark {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  flex-shrink: 0;
-}
-
-.is-done .mark {
-  background: var(--success-100);
-}
-
-.is-failed .mark {
-  background: var(--danger-100);
-}
-
-.is-unsure .mark {
-  background: var(--warning-100);
-}
-
-.is-cancelled .mark {
-  background: var(--surface-2);
-}
-
-.ok {
-  color: var(--status-success);
-}
-
-.bad {
-  color: var(--status-danger);
-}
-
-.warn {
-  color: var(--status-uncertain);
-}
-
-.label {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-
-.steps {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--text-faint);
-}
-
-.is-cancelled .label,
 .is-cancelled .text {
   color: var(--text-muted);
 }
