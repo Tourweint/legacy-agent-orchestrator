@@ -279,8 +279,10 @@ watch(() => store.activeTurnId, () => {
         <span class="stop-hint muted">{{ stopHint }}</span>
       </div>
 
-      <!-- 能力入口：说一句就能办（当前角色办得到的那些）；空闲或已办完都可用 -->
-      <div v-if="!pending && !suspended" class="capability">
+      <!-- 能力入口：说一句就能办——只在**新对话（空会话）**展示；
+           一旦用户发过消息就隐藏（2026-09-27 用户口径：示例只在第一次用的时候给，
+           后续提问不再重复；点"＋ 新对话"回到空会话又会显示） -->
+      <div v-if="!store.hasAnyTurn" class="capability">
         <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
         <div class="chips">
           <button
