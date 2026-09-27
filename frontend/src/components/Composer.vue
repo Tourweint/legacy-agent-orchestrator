@@ -29,9 +29,23 @@ defineExpose({ focus })
 const placeholder = computed(() => {
   if (props.hint) return props.hint
   if (props.suspended) return '补充信息……'
-  if (props.pending) return '正在办理……'
+  // 运行中：写请求还没发出时**可以直接说纠正话**（点了就是"停掉原任务、按新说法重来"）；
+  // 写请求已发出才锁死（此时中断是谎言）。为什么区分：界面上出现一个"点了没反应"的按钮最糟。
+  if (props.pending) {
+    return props.disabled ? '正在办理……' : '要改口就直接说新的说法（例如：不是周三，是周四）'
+  }
   if (props.terminal) return '继续说点什么，或接着办下一件……'
   return '用一句话说明要办的事'
+})
+
+/**
+ * 按钮文案要说清"点下去会发生什么"：
+ * 运行中点是**改口重来**（先停原任务、再按新说法起一轮），不是"再发一句"。
+ */
+const actionLabel = computed(() => {
+  if (props.pending) return '改口重来'
+  if (props.suspended) return '回复'
+  return '发送'
 })
 
 function onInput(e) {
@@ -56,14 +70,16 @@ function onKeydown(e) {
       @keydown.enter="emit('send')"
       @keydown="onKeydown"
     />
+    <!-- 运行中不再一律禁用：写请求未发出时，"发送"就是**改口**（否则改口路径根本没有入口，
+         ChatPane.send() 里那段处理永远走不到）。写请求已发出时由父组件传 disabled 锁死。 -->
     <button
       class="btn btn-primary"
-      :disabled="!modelValue.trim() || pending || disabled"
-      aria-label="发送"
+      :disabled="!modelValue.trim() || disabled"
+      :aria-label="actionLabel"
       @click="emit('send')"
     >
       <IconSend :size="14" />
-      {{ suspended ? '回复' : '发送' }}
+      {{ actionLabel }}
     </button>
   </div>
 </template>

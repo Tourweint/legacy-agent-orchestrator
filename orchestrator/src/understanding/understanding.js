@@ -91,10 +91,12 @@ export class UnderstandingEngine {
             reason: 'low-confidence',
             confidence: value.confidence,
             slots: value.slots,
+            // 候选意图：模型真正拿不准的那几个（素材，必须取自闭集）——编排层据此收窄候选按钮；
+            // 它没给或给得不足 2 个 → 编排层回退"所有意图"（03 章 §8.5）
+            candidateIds: value.ambiguousIntents,
             candidates: intents.map((i) => ({ id: i.id, name: i.name })),
-            clarifyQuestion:
-              value.clarifyQuestion ||
-              `您是想${intents.map((i) => `「${i.name}」`).join('，还是')}？请选择或再说清楚一些。`,
+            // 追问话术是**素材**：编排层过一遍"不含业务结论"的关卡后才决定用不用它（§九 禁忌 9）
+            clarifyQuestion: value.clarifyQuestion,
           }
         }
         // 闸门三在编排层执行（缺口 = 必填槽位 − slots 键，不采信模型的 missing）
@@ -103,7 +105,11 @@ export class UnderstandingEngine {
           intent: value.intent,
           slots: value.slots,
           confidence: value.confidence,
+          // 模型自己声明的"沿用上一轮意图 / 改了主意"（追问轮才有；编排层据此留痕，不做硬性约束）
+          intentSource: value.intentSource,
           clarifyQuestion: value.clarifyQuestion,
+          // 追问素材（可选）：给缺口配的原话例子——编排层组装追问句时用（03 章 §8.5）
+          slotExamples: value.slotExamples,
         }
       }
       lastViolations = verdict.violations

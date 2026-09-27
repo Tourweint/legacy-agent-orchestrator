@@ -625,6 +625,184 @@ test('C7 退：名下没有匹配 → 有依据拒绝（并说出当前有什么
   assert.equal(gateway.transport.calls.filter((c) => c.method === 'DELETE').length, 0)
 })
 
+// ---- 判断外移 · 追问锚点（2026-09-27）------------------------------------------
+
+test('intentSource 契约：只认 resumed / switched（自由文本一律判违规）', () => {
+  const ids = ['borrow-classroom']
+  const withSource = (intentSource) =>
+    validateUnderstandingOutput(
+      JSON.stringify({ intent: 'borrow-classroom', slots: {}, confidence: 0.9, outOfDomain: false, intentSource }),
+      ids,
+      '随便说一句',
+    )
+
+  assert.equal(withSource('resumed').value.intentSource, 'resumed')
+  assert.equal(withSource('switched').value.intentSource, 'switched')
+  // 没给该字段是合法的（首次理解本来就没有"上一轮"）——给 null 而不是编一个值
+  assert.equal(withSource(undefined).value.intentSource, null)
+
+  const bad = withSource('沿用上一轮意图')
+  assert.equal(bad.ok, false, '自由文本不得承担判断——只认枚举')
+  assert.match(bad.violations.join('；'), /intentSource/)
+})
+
+test('追问锚点：第二次理解看得到"已确定的意图 + 已收槽位 + 缺口"，追问句不重复注入', async () => {
+  const { runner, llm, chain } = makeChatRunner({}, [
+    // 第一轮：只说清了教室与日期，缺时间 → 系统追问
+    { intent: 'borrow-classroom', slots: { classroomName: '数智楼222', datePhrase: '下周三' }, confidence: 0.9, outOfDomain: false },
+    // 第二轮（追问回复）：模型自己声明这是补缺口、沿用上一轮意图
+    { intent: 'borrow-classroom', slots: { timeSegment: '下午三点到四点' }, confidence: 0.92, outOfDomain: false, intentSource: 'resumed' },
+  ])
+  const first = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: sessionIdentity('TEACHER') })
+  assert.equal(first.suspended, true, '缺时间 → 该追问')
+
+  const outcome = await runner.resumeChat({ stack: first.stack, replyText: '下午三点到四点' })
+  assert.equal(outcome.result.terminal, 'DONE')
+
+  const secondCall = llm.calls[1]
+  const asSummary = (m) => {
+    if (m.role !== 'assistant') return null
+    try {
+      const v = JSON.parse(m.content)
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : null
+    } catch {
+      return null
+    }
+  }
+  // 锚点：与少样本同形的助手结构化摘要（引擎在 beginResume 里注入）。
+  // 用 intentName 区分——提示词自带的少样本锚点例子里没有这个字段（否则会命中例子，断言变成假绿）
+  const anchor = secondCall.map(asSummary).find((v) => v && v.intentName && Array.isArray(v.missing))
+  assert.ok(anchor, '追问轮必须把锚点交给模型（已确定意图 + 已收槽位 + 缺口）——否则模型只能裸判这句话是什么意思')
+  assert.equal(anchor.intent, 'borrow-classroom')
+  assert.equal(anchor.slots.classroomName, '数智楼222', '已收下的槽位要一起交回去')
+  assert.equal(anchor.slots.datePhrase, '下周三')
+  assert.deepEqual(anchor.missing, ['timeSegment'])
+
+  // 本轮原话（用户第一句）也要在历史里——此前只有追问句，原话丢失
+  assert.ok(
+    secondCall.some((m) => m.role === 'user' && m.content === '帮我借下周三下午数智楼222'),
+    '本轮原话要在场',
+  )
+  // 追问句只出现一次（此前 #clarify 与 beginResume 各推一遍）
+  const questionLines = secondCall.filter((m) => asSummary(m) === null && /我还需要知道/.test(m.content))
+  assert.equal(questionLines.length, 1, '追问句不得重复注入')
+
+  // 留痕（I4）：模型自报的判断来源与"追问前是什么意图"都要进证据链
+  const decided = chain.getEntries().filter((e) => e.action === 'decide:understand')
+  const resumedEntry = decided.find((e) => e.input?.intentSource === 'resumed')
+  assert.ok(resumedEntry, '沿用/改口必须留痕——意图要是被换掉了，"为什么换了"要答得上')
+  assert.equal(resumedEntry.input.priorIntentId, 'borrow-classroom')
+  assert.equal(resumedEntry.input.intentSourceContradicted, undefined, '自报沿用且意图未变 → 不该登记矛盾')
+})
+
+// ---- 判断外移 · 追问话术与低置信候选（第二批，03 章 §8.5）------------------------
+
+test('追问素材清洗：例子只收原话形态短句；"拿不准的意图"必须落在闭集内', () => {
+  const ids = ['borrow-classroom', 'borrow-seat', 'query-my-reservations', 'cancel-my-reservation']
+  const verdict = validateUnderstandingOutput(
+    JSON.stringify({
+      intent: 'borrow-classroom',
+      slots: {},
+      confidence: 0.9,
+      outOfDomain: false,
+      slotExamples: {
+        timeSegment: '下午三点到四点',
+        datePhrase: '2026-09-30', // 换算后的时间形态 → 丢弃（与槽位同纪律）
+        classroomName: 'x'.repeat(40), // 过长 → 丢弃
+        seatNumber: 42, // 非字符串 → 丢弃
+      },
+      ambiguousIntents: [
+        'borrow-classroom',
+        'borrow-classroom', // 去重
+        '不存在的意图', // 闭集外 → 剔除
+        'borrow-seat',
+        'query-my-reservations',
+        'cancel-my-reservation', // 超过 3 个 → 截断
+      ],
+    }),
+    ids,
+    '随便说一句',
+  )
+  assert.equal(verdict.ok, true, '素材形状不对只是丢弃，不作废整次输出（它们都有确定性兜底）')
+  assert.deepEqual(verdict.value.slotExamples, { timeSegment: '下午三点到四点' })
+  assert.deepEqual(verdict.value.ambiguousIntents, ['borrow-classroom', 'borrow-seat', 'query-my-reservations'])
+})
+
+test('追问话术：模型在追问里编业务结论就不采用它，改用编排层组装句（并把例子带上）', async () => {
+  // 模型在追问里编了"这间教室是空的"——那是事实性断言，它没有依据（03 章 §九 禁忌 9）
+  const lying = makeChatRunner({}, [
+    {
+      intent: 'borrow-classroom',
+      slots: { classroomName: '数智楼222', datePhrase: '下周三' },
+      confidence: 0.9,
+      outOfDomain: false,
+      clarifyQuestion: '这间教室下周三下午是空的，您要用到几点？',
+      slotExamples: { timeSegment: '下午三点到四点' },
+    },
+  ])
+  const suspended = await lying.runner.executeChatTask({
+    text: '帮我借下周三数智楼222',
+    identity: sessionIdentity('TEACHER'),
+  })
+  assert.equal(suspended.suspended, true)
+  assert.doesNotMatch(
+    suspended.clarify.question,
+    /空的|空闲|可用|被占|占用/,
+    '不得把模型的业务结论转述给用户',
+  )
+  assert.match(suspended.clarify.question, /我还需要知道/)
+  assert.match(suspended.clarify.question, /下午三点到四点/, '模型给的原话例子要进组装句')
+
+  // 模型话术干净 → 就用它（自然语言的问法体验更好，不让系统句把它顶掉）
+  const clean = makeChatRunner({}, [
+    {
+      intent: 'borrow-classroom',
+      slots: { classroomName: '数智楼222', datePhrase: '下周三' },
+      confidence: 0.9,
+      outOfDomain: false,
+      clarifyQuestion: '您打算从几点用到几点？',
+    },
+  ])
+  const ok = await clean.runner.executeChatTask({
+    text: '帮我借下周三数智楼222',
+    identity: sessionIdentity('TEACHER'),
+  })
+  assert.equal(ok.clarify.question, '您打算从几点用到几点？')
+})
+
+test('低置信候选：按模型"真正拿不准的那几个"收窄；不足 2 个就回退全量候选', async () => {
+  const narrow = makeChatRunner({}, [
+    {
+      intent: 'borrow-classroom',
+      slots: { classroomName: '数智楼222' },
+      confidence: 0.3, // 低于阈值 → 闸门二：候选意图让用户选
+      outOfDomain: false,
+      ambiguousIntents: ['borrow-classroom', 'query-classroom-availability'],
+    },
+  ])
+  const picked = await narrow.runner.executeChatTask({ text: '数智楼222下午', identity: sessionIdentity('TEACHER') })
+  assert.equal(picked.suspended, true)
+  assert.deepEqual(
+    picked.clarify.candidates.map((c) => c.id),
+    ['borrow-classroom', 'query-classroom-availability'],
+  )
+  assert.match(picked.clarify.question, /借教室/)
+  assert.match(picked.clarify.question, /查询教室可用性/)
+
+  // 只给了 1 个（或给了闭集外的）→ 不足以收窄，回退"所有意图"，不能只给一个把用户带偏
+  const fallback = makeChatRunner({}, [
+    {
+      intent: 'borrow-classroom',
+      slots: { classroomName: '数智楼222' },
+      confidence: 0.3,
+      outOfDomain: false,
+      ambiguousIntents: ['borrow-classroom', '不存在的意图'],
+    },
+  ])
+  const all = await fallback.runner.executeChatTask({ text: '数智楼222下午', identity: sessionIdentity('TEACHER') })
+  assert.ok(all.clarify.candidates.length > 2, '不足 2 个 → 回退全量候选')
+})
+
 // ---- C8 改期（先建新、后撤旧）--------------------------------------------------
 
 // 与他人的冲突行：时段跨度刻意写得很宽，这样无论"周四下午"解析成哪一天都会重叠

@@ -619,10 +619,19 @@ test('会话记忆端到端：同一 conversationId 的下一轮，理解层看�
       secondCall.some((m) => m.role === 'user' && m.content === '帮我借明天下午数智楼123'),
       '上一轮原话要在场',
     )
-    assert.ok(
-      secondCall.some((m) => m.role === 'assistant' && m.content.includes('数智楼123')),
-      '上一轮的结构化摘要要在场（"那"才有所指）',
+    // 断言必须落在**注入的那一条**摘要上，而且**按位置定位**：注入的记忆是"上一轮原话 + 紧跟其后的摘要"。
+    // 为什么不能按内容找（`includes('数智楼123')` 或"带 outcome 的助手消息"）：提示词自带的少样本里
+    // 也有同样的字眼与形状，会命中例子——这条断言因此曾经假绿过两次（2026-09-27）。
+    const prevTextAt = secondCall.findIndex(
+      (m) => m.role === 'user' && m.content === '帮我借明天下午数智楼123',
     )
+    assert.ok(prevTextAt >= 0, '上一轮原话要在场')
+    const injectedRaw = secondCall[prevTextAt + 1]
+    assert.equal(injectedRaw?.role, 'assistant', '上一轮原话后面应紧跟那条结构化摘要（"那"才有所指）')
+    const injected = JSON.parse(injectedRaw.content)
+    assert.equal(injected.intent, 'borrow-classroom')
+    assert.equal(injected.slots.classroomName, '数智楼123', '记忆要带上真实槽位（此前恒为空 → 接不上上一轮的教室）')
+    assert.equal(injected.slots.datePhrase, '明天')
   } finally {
     server.close()
   }

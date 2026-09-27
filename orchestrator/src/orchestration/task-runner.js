@@ -147,12 +147,19 @@ export class TaskRunner {
     return { ...outcome, understanding: this.#chatSummary(stack) }
   }
 
-  /** 本轮的理解摘要（意图 + 槽位原话）——供会话记忆留档；未解析出时给中立值。 */
+  /**
+   * 本轮的理解摘要（意图 + 槽位原话）——供会话记忆留档；未解析出时给中立值。
+   *
+   * ★ 2026-09-27 修正（判断外移方案 §4.2）：槽位取 `tc.slots`——那是理解层真正合并进来的那份
+   *   （见 chat-bridge 的 `taskContext.slots = { ...taskContext.slots, ...understanding.slots }`）。
+   *   原实现读 `tc.chat.slots`，而**全仓从未写入过**该字段：记忆里的槽位恒为空，
+   *   于是改口新轮"改成周五下午"接不上上一轮的教室（实测又被问一次"哪间教室"）。
+   */
   #chatSummary(stack) {
     const tc = stack.taskContext
     return {
       intent: tc.intentId ?? tc.intent?.id ?? null,
-      slots: { ...(tc.chat?.slots ?? {}) },
+      slots: { ...(tc.slots ?? {}) },
     }
   }
 

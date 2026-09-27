@@ -22,6 +22,47 @@ const COMPUTED_TIME_PATTERNS = [
   [/\b\d{1,2}:\d{2}\b/, '时钟时刻'],
 ]
 
+/**
+ * 判断来源枚举（2026-09-27 判断外移 · 追问锚点）：
+ * 模型在追问轮自己声明"这轮是沿用上一轮意图，还是用户改了主意"。
+ * **必须是枚举**——不给枚举就等于让自由文本承担判断，系统无从校验
+ * （见 docs/设计方案/2026-09-27-判断外移方案-追问锚点与记忆槽位修复.md §4.1）。
+ */
+const INTENT_SOURCES = new Set(['resumed', 'switched'])
+
+/**
+ * 追问素材的两个上限/清洗（2026-09-27 判断外移 · 03 章 §8.5）。
+ * 与 intent/slots 不同，它们是**素材**不是**判定**：形状不对就丢弃，有确定性兜底
+ * （组装句 / 全量候选），因此**不作废整次输出**——为素材再问一次模型不值得。
+ */
+const MAX_EXAMPLE_LENGTH = 24
+const MAX_AMBIGUOUS_INTENTS = 3
+
+/** 追问例子：只收"用户可能怎么说"的原话形态短句；出现换算后的时间形态一律丢弃（与槽位同纪律）。 */
+function sanitizeSlotExamples(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out = {}
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw !== 'string') continue
+    const text = raw.trim()
+    if (!text || text.length > MAX_EXAMPLE_LENGTH) continue
+    if (COMPUTED_TIME_PATTERNS.some(([pattern]) => pattern.test(text))) continue
+    out[key] = text
+  }
+  return out
+}
+
+/** 拿不准的意图：必须是闭集内的 id，去重，最多 3 个（闭集外的直接剔除，不判违规）。 */
+function sanitizeAmbiguousIntents(value, intentIds) {
+  if (!Array.isArray(value)) return []
+  const out = []
+  for (const id of value) {
+    if (typeof id === 'string' && intentIds.includes(id) && !out.includes(id)) out.push(id)
+    if (out.length >= MAX_AMBIGUOUS_INTENTS) break
+  }
+  return out
+}
+
 function violationsFor(value, path, violations, intentIds, userText) {
   if (path === 'intent') {
     if (typeof value !== 'string' || !value) {
@@ -106,6 +147,12 @@ export function validateUnderstandingOutput(rawText, intentIds, userText = '') {
       violationsFor(parsed.intent, 'intent', violations, intentIds, userText)
     }
   }
+  // intentSource（可选）：模型自己声明"沿用上一轮意图 / 改了主意"——只认枚举，自由文本一律判违规
+  if (parsed.intentSource !== undefined && parsed.intentSource !== null && !INTENT_SOURCES.has(parsed.intentSource)) {
+    violations.push(
+      `intentSource 只能是 ${[...INTENT_SOURCES].join(' / ')}（收到 ${JSON.stringify(parsed.intentSource)}）`,
+    )
+  }
   if (violations.length > 0) return { ok: false, violations, parsed }
   return {
     ok: true,
@@ -115,7 +162,10 @@ export function validateUnderstandingOutput(rawText, intentIds, userText = '') {
       missing: Array.isArray(parsed.missing) ? parsed.missing : [],
       confidence: parsed.confidence,
       outOfDomain: parsed.outOfDomain,
+      intentSource: INTENT_SOURCES.has(parsed.intentSource) ? parsed.intentSource : null,
       clarifyQuestion: typeof parsed.clarifyQuestion === 'string' ? parsed.clarifyQuestion : '',
+      slotExamples: sanitizeSlotExamples(parsed.slotExamples),
+      ambiguousIntents: sanitizeAmbiguousIntents(parsed.ambiguousIntents, intentIds),
       reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
     },
   }

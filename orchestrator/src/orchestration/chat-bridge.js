@@ -14,6 +14,15 @@ import { authorizeIntent, roleLabel } from './intent-authorizer.js'
 
 // 归一化失败时的追问附录：**列出系统真正支持的说法**。
 // 只写"请换个说法"等于把猜测成本推给用户（体验问题，2026-09-26 反馈）。
+/**
+ * 追问话术里**不得出现**"业务结论/事实断言"（03 章 §九 禁忌 9）。
+ * 为什么要有这道关卡：模型的话术是自由文本，契约校验管不到它——它可能在追问里说
+ * "这间教室周三下午是空的"，凭空造出一个业务结论（结论只能来自事实与判定）。
+ * 这是**关卡**不是解析：命中就不用它、改用编排层组装句（有兜底，所以宁可误判也不放过）。
+ */
+const BUSINESS_CLAIM_PATTERN =
+  /(空的|空着|空闲|可用|不可用|被占|占用|有人用|没人用|冲突|可以借|不能借|已被?预订|已被?预约|维修|停用)/
+
 const TIME_PHRASE_HINT =
   '日期可以说：今天、明天、后天、周三、下周三、10月1日；时间可以说：上午、下午、晚上，或者"14点到16点""下午两点到四点"。'
 
@@ -27,6 +36,8 @@ export class ChatBridge {
   /** UNDERSTANDING 态处理器（chat 运行专用）。 */
   async handleUnderstanding({ machine, taskContext }) {
     const turn = taskContext.chat.pendingTurn
+    // 追问轮才可能有"上一轮已确定的意图"：判断来源（沿用/改口）与自相矛盾检测都以它为基准
+    const priorIntentId = taskContext.intentId ?? taskContext.intent?.id ?? null
     let understanding
     try {
       understanding = await this.understanding.understand({
@@ -49,12 +60,16 @@ export class ChatBridge {
       return
     }
 
+    // 本轮原话进历史（每轮恰一条）：追问轮的下一次理解必须看得到"上一轮用户说了什么"。
+    // 此前历史里只有追问句、用户原话丢失，模型无从判断这次是在补什么（03 章 §8.4）
+    taskContext.chat.history.push({ role: 'user', content: turn.text })
+
     const intentIds = this.store.intentList.map((i) => i.id)
     void intentIds
 
     if (understanding.status === 'out-of-domain') {
       // P1 决策留痕：依据 = 意图计划闭集（模型原始输出不在证据链——非确定性不作依据）
-      this.#decideUnderstand(taskContext, understanding, null)
+      this.#decideUnderstand(taskContext, understanding, null, priorIntentId)
       taskContext.outcome = {
         message: '这件事超出了我能代办的范围（我可以帮忙查询与预约校园教室），恕不能办理。',
       }
@@ -63,11 +78,13 @@ export class ChatBridge {
     }
     if (understanding.status === 'clarify') {
       // 闸门二：低置信 → 候选意图让用户选（E5）
-      this.#decideUnderstand(taskContext, understanding, null)
+      this.#decideUnderstand(taskContext, understanding, null, priorIntentId)
+      // 候选收窄：用模型"真正拿不准的那几个"（闭集内、≥2 个才用），否则回退全量（03 章 §8.5）
+      const candidates = this.#narrowCandidates(understanding)
       this.#clarify(machine, taskContext, {
         kind: 'intent-choice',
-        question: understanding.clarifyQuestion,
-        candidates: understanding.candidates,
+        question: this.#intentChoiceQuestion(understanding, candidates),
+        candidates,
       })
       return
     }
@@ -80,7 +97,7 @@ export class ChatBridge {
 
     // P1 决策留痕（带结构化载荷）：合并后的槽位才是"即将执行"的那份（跨追问轮累积），
     // 前端据此渲染"理解卡"（intentName/slots/confidence）
-    this.#decideUnderstand(taskContext, understanding, taskContext.slots)
+    this.#decideUnderstand(taskContext, understanding, taskContext.slots, priorIntentId)
 
     // 闸门四（本次新增）：按角色判权限——**在任何调用之前**（决定 5 / I5）。
     // 放在槽位追问之前：权限不对时不该先去问"哪间教室"——那是多余且误导的交互。
@@ -110,7 +127,7 @@ export class ChatBridge {
       this.#clarify(machine, taskContext, {
         kind: 'missing-slots',
         missing,
-        question: understanding.clarifyQuestion || this.#missingQuestion(missing),
+        question: this.#missingSlotsQuestion(understanding, missing),
       })
       return
     }
@@ -183,11 +200,40 @@ export class ChatBridge {
     machine.fire('INTENT_RESOLVED', { payload: intent.id })
   }
 
-  /** AWAIT_CLARIFY 恢复：记录回复、重进理解（§5.5：追问后重问理解层，而非拼接片段）。 */
+  /**
+   * AWAIT_CLARIFY 恢复：记录回复、重进理解（§5.5：追问后重问理解层，而非拼接片段）。
+   *
+   * ★ 追问轮的上下文由编排层供给（2026-09-27 判断外移 · 03 章 §8.4）：
+   *   回复要重新走一遍理解层，此前历史里只有"追问句 + 回复"——模型看不到**已经确定到哪一步**，
+   *   实测把"补时间槽位"的回复（"下午三点到四点"）判成了新意图「查询教室可用性」。
+   *   现在把"已确定的意图 + 已收槽位 + 机械算出的缺口"以结构化摘要交回模型（与少样本同形）：
+   *   **材料由系统保证齐备，沿用还是改口由模型判断**（`intentSource`），系统只校验与留痕。
+   *   （追问句本身已由 #clarify 落进历史，这里不再重复推一遍。）
+   */
   beginResume({ taskContext, replyText }) {
-    taskContext.chat.history.push({ role: 'assistant', content: taskContext.chat.clarify?.question ?? '' })
-    taskContext.chat.history.push({ role: 'user', content: replyText })
+    const anchor = this.#anchor(taskContext)
+    if (anchor) taskContext.chat.history.push({ role: 'assistant', content: JSON.stringify(anchor) })
     taskContext.chat.pendingTurn = { text: replyText }
+  }
+
+  /**
+   * 追问轮的上下文锚点：把"已经确定到哪一步、还缺什么"整理成结构化摘要
+   * （与提示词少样本里的助手摘要同形：intent / slots / missing）。
+   * 还没有已确定的意图（例如上一轮是"让用户选意图"）时返回 null——那种情况历史里的追问句已够用。
+   */
+  #anchor(taskContext) {
+    const intentId = taskContext.intentId ?? taskContext.intent?.id ?? null
+    if (!intentId) return null
+    const slots = { ...(taskContext.slots ?? {}) }
+    const required = taskContext.intent?.slots?.required ?? []
+    const missing = required.filter((key) => slots[key] === undefined || slots[key] === '')
+    return {
+      intent: intentId,
+      intentName: (this.store.intentList ?? []).find((i) => i.id === intentId)?.name ?? intentId,
+      slots,
+      missing,
+      outOfDomain: false,
+    }
   }
 
   #clarify(machine, taskContext, clarify) {
@@ -256,13 +302,61 @@ export class ChatBridge {
     }
   }
 
-  #missingQuestion(missing) {
+  /**
+   * 缺槽位时的追问话术（03 章 §8.5：模型出素材，编排层组装）。三级链：
+   *   ① 模型的话术——过了"不含业务结论"这一关就用它（自然语言更自然）；
+   *   ② 组装句——机械缺口（判定权在系统）+ 模型给的原话例子（"比如「下午三点到四点」"）；
+   *   ③ 静态话术——无模型路径（链路仍要能跑，03 章 §一）。
+   */
+  #missingSlotsQuestion(understanding, missing) {
+    return (
+      this.#usableQuestion(understanding?.clarifyQuestion) ||
+      this.#missingQuestion(missing, understanding?.slotExamples ?? {})
+    )
+  }
+
+  /**
+   * 模型的话术能不能用？03 章 §九 禁忌 9：它的自由文本可能在追问里编造业务结论
+   * （"这间教室周三下午是空的"）——那是事实性断言，模型没有依据。
+   * 命中就**不用它**（换组装句），不去解析它、也不去改写它（改写等于长出第二份判断）。
+   */
+  #usableQuestion(text) {
+    const trimmed = typeof text === 'string' ? text.trim() : ''
+    if (!trimmed) return ''
+    return BUSINESS_CLAIM_PATTERN.test(trimmed) ? '' : trimmed
+  }
+
+  /** 低置信追问的话术：同一条链——模型话术可用就用它，否则按**收窄后**的候选组装。 */
+  #intentChoiceQuestion(understanding, candidates) {
+    return (
+      this.#usableQuestion(understanding?.clarifyQuestion) ||
+      `您是想${candidates.map((c) => `「${c.name}」`).join('，还是')}？请选择或再说清楚一些。`
+    )
+  }
+
+  /**
+   * 候选收窄：模型"真正拿不准的"那几个（必须落在闭集内；**至少 2 个才采信**），
+   * 否则回退"所有意图"——宁可多列几个，也不能只给一个把用户带偏（03 章 §8.5）。
+   */
+  #narrowCandidates(understanding) {
+    const all = understanding?.candidates ?? []
+    const picked = (understanding?.candidateIds ?? []).filter((id) => all.some((c) => c.id === id))
+    if (picked.length < 2) return all
+    return picked.map((id) => all.find((c) => c.id === id))
+  }
+
+  #missingQuestion(missing, slotExamples = {}) {
     const hints = {
       classroomName: '哪间教室？',
       datePhrase: '哪一天？',
       timeSegment: '什么时间（"下午"或"14点到16点"都行）？',
     }
-    return `要办这件事，我还需要知道：${missing.map((m) => hints[m] ?? m).join('，')}。`
+    // 模型给了例子就附上（例子是原话形态，不替用户换算）——问句更具体，用户更容易答
+    const withExample = (hint, example) => (example ? `${hint.replace(/？$/, '')}（比如「${example}」）？` : hint)
+    const exampleOf = (key) => (typeof slotExamples[key] === 'string' ? slotExamples[key].trim() : '')
+    return `要办这件事，我还需要知道：${missing
+      .map((m) => withExample(hints[m] ?? m, exampleOf(m)))
+      .join('，')}。`
   }
 
   #outstandingSummary(taskContext, clarify) {
@@ -274,12 +368,27 @@ export class ChatBridge {
   /**
    * P1 理解决策留痕。mergedSlots 非空时带结构化载荷（intentName/slots/confidence），
    * 供前端渲染"理解卡"；clarify/out-of-domain 不带（追问/拒绝不走卡片）。
+   *
+   * priorIntentId：追问**之前**已确定的意图——用于给"沿用/改口"留痕（判断外移 · 2026-09-27）。
+   * 意图在追问轮被换掉时，"为什么换了"必须答得上（I4）；模型自称沿用但意图确实变了也照实登记。
    */
-  #decideUnderstand(taskContext, understanding, mergedSlots) {
+  #decideUnderstand(taskContext, understanding, mergedSlots, priorIntentId = null) {
     const payload = this.#understandPayload(understanding, mergedSlots)
+    const intentSource = understanding.intentSource ?? null
+    const contradicted =
+      understanding.status === 'ok' &&
+      intentSource === 'resumed' &&
+      priorIntentId !== null &&
+      understanding.intent !== priorIntentId
     this.#decide(taskContext, {
       action: 'decide:understand',
-      input: { status: understanding.status, confidence: understanding.confidence },
+      input: {
+        status: understanding.status,
+        confidence: understanding.confidence,
+        ...(intentSource ? { intentSource } : {}),
+        ...(priorIntentId ? { priorIntentId } : {}),
+        ...(contradicted ? { intentSourceContradicted: true } : {}),
+      },
       basis: [{ spec: 'intent-plans.yaml' }],
       conclusion: {
         outcome: understanding.status === 'ok' ? 'INTENT_RESOLVED' : understanding.status.toUpperCase(),
