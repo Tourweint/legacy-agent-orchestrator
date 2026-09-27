@@ -216,3 +216,66 @@ code,
     transform: none;
   }
 }
+
+/* ========== 高对比度模式支持 ========== */
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: #6b7488;
+    --text-muted: #3a4258;
+    --text-faint: #5a6478;
+  }
+
+  :root[data-theme='dark'] {
+    --border: #8892a8;
+    --text-muted: #c8cdda;
+    --text-faint: #a8b2c8;
+  }
+
+  button {
+    border-width: 2px;
+  }
+
+  :focus-visible {
+    outline-width: 3px;
+    outline-offset: 3px;
+  }
+}
+
+/* ========== 链接可访问性 ========== */
+
+a {
+  color: var(--accent-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--accent-700);
+}
+
+a:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* ========== 禁用状态对比度提升 ========== */
+
+:disabled {
+  opacity: 0.6;
+}
+
+/* ========== 屏幕阅读器专用文本 ========== */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

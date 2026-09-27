@@ -15,7 +15,9 @@ defineProps({
     </div>
     <div v-if="title" class="empty-title">{{ title }}</div>
     <div v-if="description" class="empty-desc">{{ description }}</div>
-    <slot />
+    <div v-if="$slots.default" class="empty-actions">
+      <slot />
+    </div>
   </div>
 </template>
 
@@ -26,17 +28,21 @@ defineProps({
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: var(--space-6) var(--space-4);
-  gap: var(--space-2);
-  border: var(--border-width) dashed var(--border);
-  border-radius: var(--radius-card);
+  padding: var(--space-7) var(--space-5);
+  gap: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .empty-icon {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   background: var(--accent-gradient-soft);
   border: var(--border-width) solid var(--accent-100);
@@ -46,7 +52,7 @@ defineProps({
 }
 
 .empty-title {
-  font-size: var(--text-base);
+  font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   color: var(--text);
 }
@@ -54,7 +60,16 @@ defineProps({
 .empty-desc {
   font-size: var(--text-sm);
   color: var(--text-muted);
-  max-width: 280px;
+  max-width: 380px;
   line-height: var(--leading-relaxed);
+}
+
+.empty-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  width: 100%;
 }
 </style>

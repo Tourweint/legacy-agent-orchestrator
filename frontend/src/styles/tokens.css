@@ -102,28 +102,40 @@
   --surface-2: #f2f4f7;
   --border: #e3e8ee;
   --text: #1a1f36;
-  --text-muted: #697386;
-  --text-faint: #9aa4b8;
+  --text-muted: #5a6478;
+  --text-faint: #7a8499;
 
   /* 氛围：背景上的极淡光晕（左上淡蓝、右下青灰），让整页有呼吸感而不抢内容 */
   --bg-glow-1: rgba(11, 135, 238, 0.055);
   --bg-glow-2: rgba(59, 130, 246, 0.04);
   --bg-glow-3: rgba(100, 116, 139, 0.045);
 
-  /* Accent 色阶（淡蓝系，500 为主色；只作点缀，主线是黑白灰线条） */
-  --accent-50: #f0f7ff;
-  --accent-100: #e0eefe;
-  --accent-200: #bae0fd;
-  --accent-300: #7cc4fb;
-  --accent-400: #36a3f7;
-  --accent-500: #0b87ee;
-  --accent-600: #0568cc;
-  --accent-700: #0652a3;
-  --accent-800: #094786;
-  --accent-900: #0c3b6e;
-  --accent: #0b87ee; /* 原有变量别名 */
-  --accent-weak: #eef6ff; /* 原有变量别名 */
+  /* Accent 色阶（靛蓝 indigo 系，500 为主色；比通用天蓝更有科技感和辨识度） */
+  --accent-50: #eef2ff;
+  --accent-100: #e0e7ff;
+  --accent-200: #c7d2fe;
+  --accent-300: #a5b4fc;
+  --accent-400: #818cf8;
+  --accent-500: #6366f1;
+  --accent-600: #4f46e5;
+  --accent-700: #4338ca;
+  --accent-800: #3730a3;
+  --accent-900: #312e81;
+  --accent: #6366f1; /* 原有变量别名 */
+  --accent-weak: #eef2ff; /* 原有变量别名 */
   --on-accent: #ffffff; /* 原有变量 */
+
+  /* 辅助强调色（暖橙 amber，用于进度、高亮、关键操作；与靛蓝形成冷暖对比） */
+  --highlight-50: #fffbeb;
+  --highlight-100: #fef3c7;
+  --highlight-200: #fde68a;
+  --highlight-300: #fcd34d;
+  --highlight-400: #fbbf24;
+  --highlight-500: #f59e0b;
+  --highlight-600: #d97706;
+  --highlight-700: #b45309;
+  --highlight-800: #92400e;
+  --highlight-900: #78350f;
 
   /* 中性色阶（Gray） */
   --gray-50: #f7f8fa;
@@ -182,11 +194,11 @@
   /* 状态色：中性 */
   --status-neutral: #697386; /* 原有变量 */
 
-  /* 渐变与光晕（浅色主题专用；克制的蓝，不喧宾夺主） */
-  --accent-gradient: linear-gradient(135deg, #0b87ee 0%, #36a3f7 100%);
-  --accent-gradient-soft: linear-gradient(135deg, rgba(11, 135, 238, 0.09), rgba(54, 163, 247, 0.05));
-  --shadow-glow: 0 0 0 4px var(--accent-100), 0 8px 24px -8px rgba(11, 135, 238, 0.22);
-  --shadow-glow-soft: 0 2px 10px -2px rgba(11, 135, 238, 0.12);
+  /* 渐变与光晕（浅色主题专用；靛蓝主色 + 暖橙点缀） */
+  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(99, 102, 241, 0.09), rgba(129, 140, 248, 0.05));
+  --shadow-glow: 0 0 0 4px var(--accent-100), 0 8px 24px -8px rgba(99, 102, 241, 0.25);
+  --shadow-glow-soft: 0 2px 10px -2px rgba(99, 102, 241, 0.12);
 }
 
 /* ========== 深色主题（投影环境风险对冲，G6） ========== */
@@ -200,34 +212,46 @@
   --surface-2: #1e2534;
   --border: #2a3247;
   --text: #e7eaf2;
-  --text-muted: #98a2b8;
-  --text-faint: #6b7488;
+  --text-muted: #a8b2c8;
+  --text-faint: #8892a8;
 
   /* 氛围：背景上的极淡光晕（深色下更弱） */
   --bg-glow-1: rgba(11, 135, 238, 0.07);
   --bg-glow-2: rgba(59, 130, 246, 0.05);
   --bg-glow-3: rgba(148, 163, 184, 0.04);
 
-  /* Accent 色阶（深色调亮，仍是蓝） */
-  --accent-50: #0a1a2e;
-  --accent-100: #10263f;
-  --accent-200: #16375c;
-  --accent-300: #1f5291;
-  --accent-400: #2f7fd0;
-  --accent-500: #4d9df0;
-  --accent-600: #6db1f4;
-  --accent-700: #8ec4f7;
-  --accent-800: #b0d7fa;
-  --accent-900: #d4e9fd;
-  --accent: #4d9df0; /* 原有变量别名 */
-  --accent-weak: #10263f; /* 原有变量别名 */
-  --on-accent: #0a1320; /* 原有变量 */
+  /* Accent 色阶（深色调亮，靛蓝 indigo） */
+  --accent-50: #1a1a3e;
+  --accent-100: #252552;
+  --accent-200: #313170;
+  --accent-300: #4338ca;
+  --accent-400: #6366f1;
+  --accent-500: #818cf8;
+  --accent-600: #a5b4fc;
+  --accent-700: #c7d2fe;
+  --accent-800: #e0e7ff;
+  --accent-900: #eef2ff;
+  --accent: #818cf8; /* 原有变量别名 */
+  --accent-weak: #252552; /* 原有变量别名 */
+  --on-accent: #1a1a3e; /* 原有变量 */
 
-  /* 渐变与光晕（深色主题专用） */
-  --accent-gradient: linear-gradient(135deg, #2f7fd0 0%, #4d9df0 100%);
-  --accent-gradient-soft: linear-gradient(135deg, rgba(47, 127, 208, 0.16), rgba(77, 157, 240, 0.08));
-  --shadow-glow: 0 0 0 4px rgba(77, 157, 240, 0.18), 0 8px 24px -8px rgba(47, 127, 208, 0.35);
-  --shadow-glow-soft: 0 2px 10px -2px rgba(47, 127, 208, 0.25);
+  /* 辅助强调色（暖橙 amber，深色下调亮） */
+  --highlight-50: #2a1e0a;
+  --highlight-100: #3a2a12;
+  --highlight-200: #55401c;
+  --highlight-300: #806028;
+  --highlight-400: #b88a34;
+  --highlight-500: #eda23c;
+  --highlight-600: #f1b560;
+  --highlight-700: #f5c884;
+  --highlight-800: #f9dba8;
+  --highlight-900: #fbeecc;
+
+  /* 渐变与光晕（深色主题专用；靛蓝主色） */
+  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(129, 140, 248, 0.08));
+  --shadow-glow: 0 0 0 4px rgba(129, 140, 248, 0.18), 0 8px 24px -8px rgba(99, 102, 241, 0.4);
+  --shadow-glow-soft: 0 2px 10px -2px rgba(99, 102, 241, 0.3);
 
   /* 中性色阶（深色） */
   --gray-50: #1a1f2e;

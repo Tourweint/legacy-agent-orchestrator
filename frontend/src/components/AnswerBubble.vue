@@ -51,7 +51,7 @@ const steps = computed(() => result.value?.steps ?? null)
 </script>
 
 <template>
-  <div v-if="kind" class="answer" :class="'is-' + kind">
+  <div v-if="kind" class="answer animate-result-in" :class="'is-' + kind">
     <div class="head">
       <span class="mark" aria-hidden="true">
         <IconCheck v-if="kind === 'done'" :size="14" class="ok" />

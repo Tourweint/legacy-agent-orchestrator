@@ -66,7 +66,7 @@ function toggle() {
 </script>
 
 <template>
-  <div v-if="thinking.steps > 0" class="thinking" :class="{ running, failed: hasFailures }">
+  <div v-if="thinking.steps > 0" class="thinking animate-item-in" :class="{ running, failed: hasFailures }">
     <button class="head" :aria-expanded="expanded" @click="toggle">
       <span class="chev" aria-hidden="true">
         <IconChevronDown v-if="expanded" :size="12" />
@@ -76,18 +76,20 @@ function toggle() {
       <span v-if="running" class="pulse-dot" aria-hidden="true"></span>
     </button>
 
-    <div v-show="expanded" class="body">
-      <ThinkingLine v-for="l in visibleLines" :key="`${l.phase}-${l.seq ?? l.text}`" :line="l" />
+    <div class="body-wrapper" :class="{ expanded }">
+      <div class="body-inner">
+        <ThinkingLine v-for="l in visibleLines" :key="`${l.phase}-${l.seq ?? l.text}`" :line="l" />
 
-      <button v-if="!fullView && thinking.hiddenCount > 0" class="more" @click="showAll = true">
-        其余 {{ thinking.hiddenCount }} 步
-      </button>
+        <button v-if="!fullView && thinking.hiddenCount > 0" class="more" @click="showAll = true">
+          其余 {{ thinking.hiddenCount }} 步
+        </button>
 
-      <button v-if="!showDetails" class="more" @click="showDetails = true">
-        查看完整留痕（{{ thinking.details.length }} 条）
-      </button>
-      <div v-else class="details">
-        <TrajectoryItem v-for="e in thinking.details" :key="e.seq" :event="e" />
+        <button v-if="!showDetails" class="more" @click="showDetails = true">
+          查看完整留痕（{{ thinking.details.length }} 条）
+        </button>
+        <div v-else class="details">
+          <TrajectoryItem v-for="e in thinking.details" :key="e.seq" :event="e" />
+        </div>
       </div>
     </div>
   </div>
@@ -131,6 +133,11 @@ function toggle() {
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.expanded .chev {
+  transform: rotate(90deg);
 }
 
 .title {
@@ -143,21 +150,61 @@ function toggle() {
   background: var(--accent-weak);
 }
 
+/* 运行中标题后的跳动省略号 */
+.running .title::after {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  text-align: left;
+  animation: dots 1.4s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+  100% { content: ''; }
+}
+
 .failed .head {
   color: var(--status-danger);
   border-color: var(--danger-200);
   background: var(--danger-50);
 }
 
-.body {
-  margin: var(--space-2) 0 var(--space-3);
-  padding: var(--space-2) var(--space-3);
+/* grid 高度动画技巧：0fr → 1fr 实现平滑展开/收起，无需知道内容高度 */
+.body-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-slow) var(--ease-standard);
+}
+
+.body-wrapper.expanded {
+  grid-template-rows: 1fr;
+}
+
+.body-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.body-inner > :first-child {
+  margin-top: var(--space-2);
+}
+
+.body-inner > :last-child {
+  margin-bottom: var(--space-3);
+}
+
+.body-inner {
+  padding: 0 var(--space-3);
   background: var(--surface-2);
   border-radius: var(--radius-medium);
   border-left: 2px solid var(--accent-200);
 }
 
-.failed .body {
+.failed .body-inner {
   border-left-color: var(--danger-200);
 }
 

@@ -231,7 +231,12 @@ onUnmounted(() => {
   height: 56px;
   padding: 0 var(--space-4);
   border-bottom: var(--border-width) solid var(--border);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+  position: relative;
+  z-index: var(--z-sticky);
 }
 
 .topbar-left {
@@ -281,13 +286,20 @@ onUnmounted(() => {
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
   background: var(--accent-gradient);
   color: #ffffff;
-  box-shadow: var(--shadow-glow-soft);
+  box-shadow:
+    0 2px 8px -2px rgba(99, 102, 241, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
   flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.brand-mark:hover {
+  transform: scale(1.05);
 }
 
 .brand {
@@ -438,10 +450,13 @@ onUnmounted(() => {
 
 .role {
   background: var(--accent-weak);
-  color: var(--accent);
+  color: var(--accent-600);
+  border: 1px solid var(--accent-200);
   border-radius: 999px;
-  padding: 2px 9px;
+  padding: 3px 10px;
   font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 .name {
@@ -489,6 +504,22 @@ onUnmounted(() => {
 
   .views:not(.side-collapsed) {
     grid-template-rows: auto minmax(0, 1fr);
+  }
+}
+
+/* 平板横屏（1024px 以下）：顶部栏更紧凑 */
+@media (max-width: 1024px) {
+  .topbar {
+    padding: 0 var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .tagline {
+    display: none;
+  }
+
+  .conn-label {
+    display: none;
   }
 }
 
