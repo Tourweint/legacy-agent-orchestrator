@@ -194,7 +194,7 @@ watch(() => store.activeTurnId, () => {
     >
       <EmptyState
         v-if="!store.hasAnyTurn"
-        title="开始一次代办"
+        title="开始预约教室"
         description="试试：「帮我借下周三下午数智楼222」。办完之后接着在这段对话里说下一句就行——它记得住上文。"
       />
 

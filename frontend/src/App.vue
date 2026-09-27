@@ -12,7 +12,7 @@ import { useSessionStore } from './stores/session.js'
 import { useTaskStore } from './stores/task.js'
 import { useGlossaryStore } from './stores/glossary.js'
 import { useConversationsStore } from './stores/conversations.js'
-import { IconSpinner, IconFlag, IconCheck, IconX, IconSidebar } from './icons/index.js'
+import { IconCheck, IconSidebar } from './icons/index.js'
 
 const session = useSessionStore()
 const glossary = useGlossaryStore()
@@ -41,32 +41,6 @@ watch(
 const store = useTaskStore()
 const { theme, toggleTheme } = useTheme()
 const showShortcuts = ref(false)
-
-// 顶栏任务状态指示器
-const statusView = computed(() => {
-  const status = store.taskStatus
-  if (status === 'running') {
-    return { show: true, label: '运行中', cls: 'running', icon: IconSpinner, spin: true }
-  }
-  if (status === 'suspended') {
-    return { show: true, label: '等待输入', cls: 'suspended', icon: IconFlag, spin: false }
-  }
-  if (status === 'terminal') {
-    // 用户自己停的：说"已取消"，别说"未能办成"——同一件事在界面上只能有一个说法
-    if (store.activeTurn?.cancelled) {
-      return { show: true, label: '已取消', cls: 'cancelled', icon: IconX, spin: false }
-    }
-    const terminalStatus = store.terminalEvent?.status
-    if (terminalStatus === 'done') {
-      return { show: true, label: '已办成', cls: 'success', icon: IconCheck, spin: false }
-    }
-    if (terminalStatus === 'failed' && store.result?.terminal !== 'UNRESOLVED') {
-      return { show: true, label: '未能办成', cls: 'danger', icon: IconX, spin: false }
-    }
-    return { show: true, label: '待人工处理', cls: 'suspended', icon: IconFlag, spin: false }
-  }
-  return { show: false, label: '', cls: '', icon: null, spin: false }
-})
 
 // SSE 连接状态指示器（仅在有任务时显示）
 const connectionView = computed(() => {
@@ -146,28 +120,10 @@ onUnmounted(() => {
           <IconSidebar :size="17" />
         </button>
         <span class="brand-mark" aria-hidden="true"><IconCheck :size="13" /></span>
-        <h1 class="brand">校园教室代办</h1>
-        <p class="tagline">每一步都看得见依据</p>
+        <h1 class="brand">预约教室助手</h1>
       </div>
 
       <div class="topbar-center">
-        <Transition name="fade">
-          <div
-            v-if="statusView.show"
-            class="status-badge"
-            :class="'st-' + statusView.cls"
-            role="status"
-            aria-live="polite"
-          >
-            <component
-              :is="statusView.icon"
-              :size="12"
-              :class="{ 'status-spin': statusView.spin }"
-              aria-hidden="true"
-            />
-            <span>{{ statusView.label }}</span>
-          </div>
-        </Transition>
         <Transition name="fade">
           <div
             v-if="connectionView.show"
@@ -321,60 +277,6 @@ onUnmounted(() => {
   letter-spacing: 0.2px;
 }
 
-.tagline {
-  color: var(--text-faint);
-  font-size: var(--text-xs);
-  padding-left: var(--space-3);
-  border-left: var(--border-width) solid var(--border);
-  white-space: nowrap;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  border-radius: var(--radius-pill);
-  border: var(--border-width) solid;
-}
-
-.status-badge.st-running {
-  color: var(--accent-600);
-  border-color: var(--accent-200);
-  background: var(--accent-50);
-}
-
-.status-badge.st-suspended {
-  color: var(--warning-700);
-  border-color: var(--warning-200);
-  background: var(--warning-50);
-}
-
-.status-badge.st-success {
-  color: var(--success-700);
-  border-color: var(--success-200);
-  background: var(--success-50);
-}
-
-.status-badge.st-danger {
-  color: var(--danger-600);
-  border-color: var(--danger-200);
-  background: var(--danger-50);
-}
-
-/* 用户主动取消：中性灰（不是失败，也不该显得像出错了） */
-.status-badge.st-cancelled {
-  color: var(--text-muted);
-  border-color: var(--border);
-  background: var(--surface-2);
-}
-
-.status-spin {
-  animation: spin 0.9s linear infinite;
-}
-
 /* SSE 连接状态指示器 */
 .conn-indicator {
   display: inline-flex;
@@ -436,12 +338,6 @@ onUnmounted(() => {
 
 .conn-failed .conn-dot {
   background: var(--danger-500);
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .fade-enter-active,
@@ -530,10 +426,6 @@ onUnmounted(() => {
     font-size: var(--text-md);
   }
 
-  .tagline {
-    display: none;
-  }
-
   .name {
     display: none;
   }
@@ -541,11 +433,6 @@ onUnmounted(() => {
 
 /* 小屏手机：更紧凑 */
 @media (max-width: 480px) {
-  .status-badge {
-    padding: 3px 8px;
-    font-size: 10px;
-  }
-
   .conn-label {
     display: none;
   }

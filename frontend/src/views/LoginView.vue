@@ -26,7 +26,7 @@ async function submit() {
     <form class="card" @submit.prevent="submit">
       <div class="brand-row">
         <span class="brand-mark" aria-hidden="true"><IconCheck :size="14" /></span>
-        <div class="brand">校园教室代办</div>
+        <div class="brand">预约教室助手</div>
       </div>
       <div class="sub">用你在校园系统里的账号登录——我们不另建账号</div>
 
