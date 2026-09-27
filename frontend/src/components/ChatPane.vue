@@ -411,20 +411,25 @@ watch(() => store.activeTurnId, () => {
   left: 50%;
   transform: translateX(-50%);
   top: 34vh;
-  /* 宽度统一：hero 与 dock 同一宽度（min(820px, 视口-48px) 自适应），
-     切换时不再有宽度变化（用户口径："开启对话后对话框不一般大，非常奇怪"）。
-     切换动画 = 纯位置移动（top 300ms）+ 标题淡出。 */
-  width: min(820px, calc(100% - 48px));
+  /* 宽度分态：空态（hero）= 486px 固定，与下方快捷示例 chips 容器同宽
+     （实测 chips 486px；用户口径："输入条拉得太长了，要跟底下快捷发送的例子
+     保持一样的宽度，无论左侧收起还是不收起"——固定值不随左栏状态/对话区宽度变）；
+     对话态（dock）= min(820px, 视口-48px) 底部惯例宽度。
+     切换时宽度平滑过渡（width 300ms 与 top 同步）。 */
+  width: min(486px, calc(100% - 48px));
   display: flex;
   flex-direction: column;
   --stop-h: 0px;
-  transition: top 300ms var(--ease-standard);
+  transition:
+    top 300ms var(--ease-standard),
+    width 300ms var(--ease-standard);
   z-index: 2;
 }
 
 .chat.has-turns .composer-host {
   /* dock 位置：底部留白 18px；出现停止按钮时整体上移 --stop-h（约 34px） */
   top: calc(100% - 62px - var(--stop-h));
+  width: min(820px, calc(100% - 48px));
 }
 
 .composer-host.has-stop {
@@ -557,7 +562,13 @@ watch(() => store.activeTurnId, () => {
 .chips {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-2);
+  /* 与输入条同宽：**纯固定 486px**（% 在 .hero-chips（absolute shrink-to-fit）内不可靠，
+     实测左栏收起后变 620、再展开变 438）。左栏收起/展开、对话区宽度变化都不影响，
+     示例组和输入条始终左右对齐成一组（用户口径："要跟底下快捷发送的例子
+     保持一样的宽度，无论左侧收起还是不收起"） */
+  width: 486px;
 }
 
 .chip {
