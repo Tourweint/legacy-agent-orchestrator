@@ -57,6 +57,8 @@
 
 **空态构图精简（2026-09-27）**：用户嫌"太居中了"，空态再精简——标题加逗号"**预约教室，从这里开始**"、**放大镜 SVG 移到标题左边**（同一行，hero 不再用 EmptyState 组件）；删掉描述"用一句话说明要办的事"（在输入框 placeholder 里，不重复）与示例标签"可以这样说（角色）"（只留 chips）；**发送按钮改 40×40 小圆**（只图标、文字隐藏，dock 形态不变）；垂直重心偏上（`margin: 12vh auto auto`，不再钉死正中）。详见 [该变更记录](docs/变更记录/2026-09-27-空态构图精简-放大镜标题与圆形按钮.md)。验证：前端 `npm test` 10/10 + lint + build、浏览器（标题/图标/按钮圆形 40×40/描述标签不存在/chips 保留/重心 20% 偏上）。
 
+**输入条居中修复与 class 撞名根治（2026-09-27）**：底部输入条"发送没居中、placeholder 上下间距不均"——根因是 **CSS class 撞名**：Composer 根元素 `class="composer dock"` 撞 ChatPane `.dock` 容器（同特异性、ChatPane 后注入获胜），padding 被污染成上 8/下 18 → 输入框整体偏上 10px；hero 输入条 `class="composer hero"` 撞 ChatPane 空态容器 `.hero`（`flex-direction: column`）→ 输入框与按钮变竖排、输入条高 122px。改动：① `Composer.vue` 根类改 `:class="{ hero: variant === 'hero' }"`（非 hero 不再输出 `dock` 类）；② 按钮**统一纯图标**（dock 32×32、hero 40×40 圆，`.btn-label` 全局隐藏，语义走 aria-label/title）；③ 输入文字垂直居中（padding 0 + line-height 32/36px）；④ `ChatPane.vue` 空态容器 `.hero` → **`.hero-layout`**（消除与 hero 形态撞名）。**经验**：组件根元素 class 名不要与父组件容器类撞名（scoped 属性会落到子组件根元素上）。详见 [该变更记录](docs/变更记录/2026-09-27-输入条居中修复-按钮纯图标与class撞名根治.md)。验证：前端 `npm test` 10/10 + lint + build、浏览器（dock 输入框垂直偏移 0、按钮 32×32 纯图标贴右；hero row 布局高 70px、按钮在输入框右侧）。
+
 - 交付物：`docs/` 下的基线文档、设计方案、变更记录、研发规范、实验、演示；实现期代码交付物：`orchestrator/`、`frontend/`、`deploy/`
 - 2026-09-24 在只被要求"写方案"时误产出的可运行代码骨架（原 `_prototype/`）**已整份删除**：其 7 条实测结论（V1–V7）与全部客观事实经逐条核验已落入 `docs/`；被删原因见 [交付物越界与降级处置](docs/变更记录/2026-09-24-交付物越界与降级处置.md)
 - 设计方案 **13 章已定稿**，各章待决项已汇总（见 `docs/设计方案/2026-09-25-方案待决项决策汇总.md`），并已完成**架构一审、二审、三审（均 2026-09-25）**：

@@ -61,7 +61,7 @@ function onKeydown(e) {
 </script>
 
 <template>
-  <div class="composer" :class="variant">
+  <div class="composer" :class="{ hero: variant === 'hero' }">
     <input
       ref="inputEl"
       :value="modelValue"
@@ -114,23 +114,38 @@ function onKeydown(e) {
   border: none;
   background: transparent;
   box-shadow: none;
-  padding: var(--space-2) 4px;
+  /* 2026-09-27：文字不垂直居中的根因——垂直 padding 8px + 默认行高(~19px) 溢出 16px 内容区，
+     文字上 8px / 下 4.8px 不均。改 padding: 0 + 显式 line-height，文字必然垂直居中。 */
+  padding: 0 4px;
+  line-height: 32px;
 }
 
 .composer .input:focus {
   box-shadow: none;
 }
 
+/* 按钮统一纯图标（2026-09-27 用户口径："发送"两个字取消，只留小飞机 SVG）：
+   dock 与 hero 都不显示文字，语义靠 aria-label/title 与 placeholder 承担。
+   dock 按钮因此收窄成一个紧凑色块，右侧不再有"没居中"的文字按钮。 */
 .composer .btn {
   flex-shrink: 0;
   border-radius: var(--radius-small);
+  padding: 8px;
+  justify-content: center;
+}
+
+.composer .btn .btn-label {
+  display: none;
 }
 
 /* 空态中央宽输入框（hero）：不扁平——更宽、圆角更大、内边距更厚、输入字号更大。
    宽度按视口百分比自适应（约 50%，DeepSeek 神似；浏览器窄了自动变窄），
    上限 680px 防超宽屏拉散。发送按钮做成**右下角小圆**（2026-09-27 用户口径）：
-   只留发送图标、文字隐藏，圆形 40px、按钮在 flex 最右。 */
+   只留发送图标、文字隐藏，圆形 40px、按钮在 flex 最右。
+   ⚠️ margin: 0 必须显式写：元素同时带 .hero 类，ChatPane 的 .hero（12vh auto auto）
+   会兜底作用到它（.composer.hero 特异性高但没写 margin）。 */
 .composer.hero {
+  margin: 0;
   width: min(50vw, 680px);
   max-width: 100%;
   padding: 14px 10px 14px 18px;
@@ -139,7 +154,8 @@ function onKeydown(e) {
 }
 
 .composer.hero .input {
-  padding: var(--space-2) 6px;
+  padding: 0 6px;
+  line-height: 36px;
   font-size: var(--text-base);
 }
 
@@ -150,10 +166,6 @@ function onKeydown(e) {
   justify-content: center;
   border-radius: 50%;
   flex-shrink: 0;
-}
-
-.composer.hero .btn .btn-label {
-  display: none;
 }
 
 .composer.hero .btn svg {

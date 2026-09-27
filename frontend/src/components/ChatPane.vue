@@ -202,7 +202,7 @@ watch(() => store.activeTurnId, () => {
            放大镜 + 标题一行 → 中央宽输入框（发送按钮=右下角小圆）→ 输入框下方示例。
            描述/示例标签都不显示（提示词已在输入框里），一旦发出第一条消息整体让位给消息流。 -->
       <template v-if="!store.hasAnyTurn">
-        <div class="hero">
+        <div class="hero-layout">
           <div class="hero-heading">
             <IconSearch :size="22" :stroke-width="1.5" aria-hidden="true" />
             <h2 class="hero-title">预约教室，从这里开始</h2>
@@ -362,11 +362,13 @@ watch(() => store.activeTurnId, () => {
   padding: var(--space-4) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-5);
 }
 
-/* 空态中央构图（hero）：放大镜+标题一行 → 中央宽输入框 → 示例 chips。
-   hero 在 messages（flex column）里靠 margin 顶部留白 + 底部自适应占位——垂直重心略偏上
+/* 空态中央构图（hero-layout）：放大镜+标题一行 → 中央宽输入框 → 示例 chips。
+   命名 hero-layout 而非 hero：Composer 的 hero 形态也叫 .hero，
+   撞名会让本容器的 flex-direction:column 等规则兜底污染输入条（2026-09-27 实测踩过）。
+   容器在 messages（flex column）里靠 margin 顶部留白 + 底部自适应占位——垂直重心略偏上
    （用户口径"太居中了"：不再钉死在屏幕正中，接近 DeepSeek 的构图上移手感）；
    水平仍居中。发消息后让位给消息流。 */
-.hero {
+.hero-layout {
   margin: 12vh auto auto;
   display: flex;
   flex-direction: column;
