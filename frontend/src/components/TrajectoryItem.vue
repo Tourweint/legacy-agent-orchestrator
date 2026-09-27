@@ -180,11 +180,11 @@ async function toggleExpand() {
 
 .chip {
   font-size: var(--text-xs);
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  border: var(--border-width) solid var(--border);
-  color: var(--text-muted);
-  background: var(--surface);
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  color: var(--text-faint);
+  background: transparent;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -192,14 +192,10 @@ async function toggleExpand() {
 
 .chip.identity {
   color: var(--accent);
-  border-color: var(--accent-200);
-  background: var(--accent-50);
 }
 
 .chip.injected {
   color: var(--status-uncertain);
-  border-color: var(--status-uncertain);
-  background: var(--status-uncertain-weak);
   font-weight: var(--weight-semibold);
 }
 

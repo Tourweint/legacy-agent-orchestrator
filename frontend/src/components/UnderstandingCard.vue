@@ -44,16 +44,16 @@ defineEmits(['correct'])
 </template>
 
 <style scoped>
-/* 浅灰底 + 细边框的卡片：不抢对话正文的注意力，又一眼能确认"它听懂了什么" */
+/* 极简理解行：无卡片、无边框——就一行"我理解成了什么"，靠字号与留白分层 */
 .understand-card {
   align-self: stretch;
-  background: var(--surface-2);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-medium);
-  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: var(--space-2) 0 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .uc-head {
@@ -64,9 +64,21 @@ defineEmits(['correct'])
 }
 
 .uc-intent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--text);
+}
+
+.uc-intent::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
 }
 
 .uc-fix {
@@ -83,7 +95,7 @@ defineEmits(['correct'])
 }
 
 .uc-fix:hover:not(:disabled) {
-  background: var(--accent-100);
+  background: var(--accent-weak);
 }
 
 .uc-fix:disabled {
@@ -94,14 +106,15 @@ defineEmits(['correct'])
 .uc-slots {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-3);
+  padding-left: 14px;
 }
 
 .uc-chip {
-  background: var(--surface);
-  border: var(--border-width) solid var(--border);
-  border-radius: 999px;
-  padding: 2px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   font-size: 12px;
   color: var(--text-muted);
 }

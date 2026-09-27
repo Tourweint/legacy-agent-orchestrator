@@ -102,29 +102,25 @@ function toggle() {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  background: var(--surface-2);
-  border: var(--border-width) solid var(--border);
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+  border-radius: 0;
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-size: var(--text-xs);
   font-family: inherit;
-  transition:
-    color var(--dur-fast) var(--ease-standard),
-    background-color var(--dur-fast) var(--ease-standard),
-    border-color var(--dur-fast) var(--ease-standard);
+  transition: color var(--dur-fast) var(--ease-standard);
 }
 
 .head:hover {
-  color: var(--accent-700);
-  background: var(--accent-weak);
-  border-color: var(--accent-200);
+  color: var(--text-muted);
 }
 
 .head:focus-visible {
   outline: 2px solid var(--accent-500);
   outline-offset: 1px;
+  border-radius: var(--radius-xs);
 }
 
 .chev {
@@ -139,26 +135,18 @@ function toggle() {
 
 .running .head {
   color: var(--accent);
-  border-color: var(--accent-200);
-  background: var(--accent-weak);
 }
 
 .failed .head {
   color: var(--status-danger);
-  border-color: var(--danger-200);
-  background: var(--danger-50);
 }
 
 .body {
   margin: var(--space-2) 0 var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-2);
-  border-radius: var(--radius-medium);
-  border-left: 2px solid var(--accent-200);
-}
-
-.failed .body {
-  border-left-color: var(--danger-200);
+  padding: 0 0 0 var(--space-5);
+  background: transparent;
+  border-radius: 0;
+  border-left: none;
 }
 
 .more {

@@ -75,29 +75,8 @@ const steps = computed(() => result.value?.steps ?? null)
 
 <style scoped>
 .answer {
-  margin: var(--space-3) 0 var(--space-2);
-  padding: var(--space-4) var(--space-5);
-  border-radius: var(--radius-lg);
-  border: var(--border-width) solid var(--border);
-  border-left-width: 3px;
-  background: var(--surface-1);
-  box-shadow: var(--shadow-xs);
-}
-
-.is-done {
-  border-left-color: var(--status-success);
-}
-
-.is-failed {
-  border-left-color: var(--status-danger);
-}
-
-.is-unsure {
-  border-left-color: var(--status-uncertain);
-}
-
-.is-cancelled {
-  border-left-color: var(--text-faint);
+  margin: var(--space-4) 0 var(--space-2);
+  padding: 0;
 }
 
 .head {
@@ -110,9 +89,9 @@ const steps = computed(() => result.value?.steps ?? null)
 .mark {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
   flex-shrink: 0;
 }
 
