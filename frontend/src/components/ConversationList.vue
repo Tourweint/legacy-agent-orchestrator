@@ -51,61 +51,75 @@ function startNew() {
 
 <template>
   <aside class="side" :class="{ collapsed }" aria-label="会话列表">
-    <div class="head">
-      <button v-if="!collapsed" class="btn btn-ghost btn-sm new" @click="startNew">
-        ＋ 新对话
-      </button>
-    </div>
-
-    <nav v-if="!collapsed" class="list">
-      <div v-for="[label, list] in groups" :key="label" class="group">
-        <div class="group-label">{{ label }}</div>
-        <button
-          v-for="c in list"
-          :key="c.id"
-          class="item"
-          :class="{ active: c.id === convs.activeId }"
-          :title="c.title"
-          @click="open(c)"
-        >
-          <span class="dot" :class="'is-' + statusOf(c)" aria-hidden="true"></span>
-          <span class="title">{{ c.title }}</span>
+    <div class="side-inner">
+      <div class="head">
+        <button class="btn btn-ghost btn-sm new" @click="startNew">
+          ＋ 新对话
         </button>
       </div>
-      <p v-if="convs.sorted.length === 0" class="empty">还没有对话记录</p>
-    </nav>
+
+      <nav class="list">
+        <div v-for="[label, list] in groups" :key="label" class="group">
+          <div class="group-label">{{ label }}</div>
+          <button
+            v-for="c in list"
+            :key="c.id"
+            class="item"
+            :class="{ active: c.id === convs.activeId }"
+            :title="c.title"
+            @click="open(c)"
+          >
+            <span class="dot" :class="'is-' + statusOf(c)" aria-hidden="true"></span>
+            <span class="title">{{ c.title }}</span>
+          </button>
+        </div>
+        <p v-if="convs.sorted.length === 0" class="empty">还没有对话记录</p>
+      </nav>
+    </div>
   </aside>
 </template>
 
 <style scoped>
 /* 全屏工作台（2026-09-27）：左栏占满整列高度、自己滚动；收起时整列隐藏
-   （不留窄边——展开入口在顶栏的开关按钮上）。 */
+   （不留窄边——展开入口在顶栏的开关按钮上）。
+
+   收起动画（2026-09-27 改）：内容层 .side-inner 固定为展开宽度 268px（absolute），
+   容器 .side 宽度随 grid 轨道塌缩时**内容不变形**——不再被横向压扁/换行竖排，
+   而是保持完整、被容器右缘裁切，视觉上像一块板子水平平移滑出（DeepSeek 同款手感）。 */
 .side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  position: relative;
   height: 100%;
   min-height: 0;
   min-width: 0;
-  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
   background: var(--bg); /* 比对话区浅一档：一眼分得清"这是列表、那是对话" */
   border-right: var(--border-width) solid var(--border);
   overflow: hidden;
-  /* 收起动画：宽度/内边距/边框随 grid 轨道同步过渡；visibility 延迟到动画结束再隐藏，
+  /* 收起动画：宽度/边框随 grid 轨道同步过渡；visibility 延迟到动画结束再隐藏，
      展开时立即显示（这样动画期间列表是看得见的） */
   transition:
     width var(--dur-base) var(--ease-standard),
-    padding var(--dur-base) var(--ease-standard),
     border-color var(--dur-base) var(--ease-standard),
     visibility 0s linear var(--dur-base);
+}
+
+/* 内容层：固定展开宽度，不随容器压缩。absolute 定位让它脱离容器宽度变化，
+   容器塌缩时右侧被 overflow:hidden 裁掉 → 水平平移感；自身不需要动画。 */
+.side-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 268px; /* 必须与 App.vue .views 的展开轨道宽度一致 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
 }
 
 /* 收起：整列塌到 0 宽并裁切内容。不 display:none——左栏必须继续占住 grid 第一列，
    对话区才稳定留在第二列（display:none 会让对话区被 auto-placement 挤进 0 宽列）。 */
 .side.collapsed {
   width: 0;
-  padding-left: 0;
-  padding-right: 0;
   border-right-color: transparent;
   visibility: hidden;
 }
@@ -113,7 +127,6 @@ function startNew() {
 .side:not(.collapsed) {
   transition:
     width var(--dur-base) var(--ease-standard),
-    padding var(--dur-base) var(--ease-standard),
     border-color var(--dur-base) var(--ease-standard),
     visibility 0s linear 0s;
 }
@@ -140,13 +153,19 @@ function startNew() {
 }
 
 /* 窄屏：左栏变成对话框上方的一条横向列表，限高以免把对话挤出屏幕。
-   窄屏下收起仍用 display:none（横条高度动画价值低，保持简单）。 */
+   窄屏下收起仍用 display:none（横条高度动画价值低，保持简单）。
+   ⚠️ 内容层必须回 static：容器高度 auto，absolute 会脱离流导致高度塌陷。 */
 @media (max-width: 900px) {
   .side {
     height: auto;
     max-height: 38vh;
     border-right: none;
     border-bottom: var(--border-width) solid var(--border);
+  }
+
+  .side-inner {
+    position: static;
+    width: auto;
   }
 
   .side.collapsed {
