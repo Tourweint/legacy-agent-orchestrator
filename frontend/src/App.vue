@@ -163,9 +163,11 @@ onUnmounted(() => {
         </button>
         <ThemeToggle :theme="theme" @toggle="toggleTheme" />
         <div v-if="session.isLoggedIn" class="who">
-          <span class="role">{{ session.roleLabel }}</span>
-          <span class="name">{{ session.displayName }}</span>
-          <button class="link" type="button" @click="logout">退出登录</button>
+          <span class="who-badge">
+            <span class="role">{{ session.roleLabel }}</span>
+            <span class="name">{{ session.displayName }}</span>
+          </span>
+          <button class="logout-btn" type="button" @click="logout">退出登录</button>
         </div>
       </div>
     </header>
@@ -362,6 +364,9 @@ onUnmounted(() => {
   opacity: 0;
 }
 
+/* 账号区（2026-09-27 打磨）：角色 + 用户名收进一个浅灰胶囊（与连接指示器同体系），
+   退出登录改为细边框 ghost 按钮（去掉下划线链接感）——顶栏右侧节奏统一为
+   "图标按钮 ×3 → 账号胶囊 → 退出按钮"，克制的灰/淡蓝，不喧宾夺主。 */
 .who {
   display: flex;
   align-items: center;
@@ -369,28 +374,45 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
+.who-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
 .role {
-  background: var(--accent-weak);
   color: var(--accent);
-  border-radius: 999px;
-  padding: 2px 9px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .name {
-  color: var(--text-muted);
+  color: var(--text);
 }
 
-.link {
-  background: none;
-  border: none;
+.logout-btn {
+  background: transparent;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-pill);
   color: var(--text-muted);
   font-size: 12px;
   font-family: inherit;
+  padding: 3px 12px;
   cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  white-space: nowrap;
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard);
+}
+
+.logout-btn:hover {
+  border-color: var(--danger-300);
+  color: var(--danger-600);
+  background: var(--danger-50);
 }
 
 .booting {

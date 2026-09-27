@@ -337,7 +337,9 @@ watch(() => store.activeTurnId, () => {
 
 .dock {
   flex-shrink: 0;
-  padding: var(--space-2) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-3);
+  /* 底部留白 18px（2026-09-27 用户拍板"16~20 左右"）：输入框不再压着屏幕底边，
+     留出稳定间隙；顶部仍 8px，消息区与输入区保持紧凑 */
+  padding: var(--space-2) max(var(--space-5), calc((100% - 820px) / 2)) 18px;
 }
 
 .bubble {
