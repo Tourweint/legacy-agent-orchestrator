@@ -14,6 +14,14 @@ const session = useSessionStore()
 const draft = ref('')
 const listEl = ref(null)
 const composerRef = ref(null)
+// 空态中央输入框（hero）：与底部 dock 各一个实例，同一时刻只渲染其一（v-if 互斥）。
+// Ctrl/Cmd + K 聚焦当前可见的那个。
+const heroComposerRef = ref(null)
+
+function focusComposer() {
+  if (!store.hasAnyTurn) heroComposerRef.value?.focus()
+  else composerRef.value?.focus()
+}
 
 // 能力入口（示例话术）：一点即发。为什么要有它——评委不该为了看"能干什么"自己先想句子；
 // 每条话术都是**当前角色真的能办成**的事（不是宣传语），按角色只显示办得到的那些。
@@ -143,11 +151,11 @@ function handleKeydown(e) {
   }
 }
 
-// 全局快捷键：Ctrl/Cmd + K 聚焦输入框
+// 全局快捷键：Ctrl/Cmd + K 聚焦输入框（空态聚焦中央、对话中聚焦底部）
 function handleGlobalKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault()
-    composerRef.value?.focus()
+    focusComposer()
   }
 }
 
@@ -191,14 +199,45 @@ watch(() => store.activeTurnId, () => {
       aria-label="对话消息"
       @scroll.passive="onScroll"
     >
-      <EmptyState
-        v-if="!store.hasAnyTurn"
-        title="开始预约教室"
-        description="试试：「帮我借下周三下午数智楼222」。办完之后接着在这段对话里说下一句就行——它记得住上文。"
-      />
+      <!-- 空态 = DeepSeek 神似的中央构图（2026-09-27 用户口径）：
+           问候 → 中央宽输入框 → 输入框下方示例。一旦发出第一条消息整体让位给消息流。 -->
+      <template v-if="!store.hasAnyTurn">
+        <div class="hero">
+          <EmptyState title="预约教室从这里开始" description="用一句话说明要办的事" />
+
+          <Composer
+            ref="heroComposerRef"
+            v-model="draft"
+            variant="hero"
+            :suspended="suspended"
+            :pending="pending"
+            :terminal="terminal"
+            :disabled="correcting || (pending && store.writeIssued)"
+            @send="send"
+            @keydown="handleKeydown"
+          />
+
+          <!-- 快捷发送：空态时放在中央输入框下方（用户口径：第一次给示例，后续不再重复） -->
+          <div class="hero-chips">
+            <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
+            <div class="chips">
+              <button
+                v-for="text in examples"
+                :key="text"
+                class="chip"
+                :disabled="pending"
+                @click="useExample(text)"
+              >
+                {{ text }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
 
       <!-- 会话 = 多轮；每轮 = 这一轮用户说过的话 + 该轮事件派生的助手消息 -->
-      <template v-for="(turn, ti) in store.turns" :key="turn.id">
+      <template v-else>
+        <template v-for="(turn, ti) in store.turns" :key="turn.id">
         <div
           v-for="(text, ui) in turn.userMessages"
           :key="'u' + ti + '-' + ui"
@@ -266,6 +305,7 @@ watch(() => store.activeTurnId, () => {
 
         <!-- 结论：核心输出（唯一默认可见的助手内容）——用大字答话，不藏在过程里 -->
         <AnswerBubble :turn="turn" />
+        </template>
       </template>
     </div>
 
@@ -279,27 +319,12 @@ watch(() => store.activeTurnId, () => {
         <span class="stop-hint muted">{{ stopHint }}</span>
       </div>
 
-      <!-- 能力入口：说一句就能办——只在**新对话（空会话）**展示；
-           一旦用户发过消息就隐藏（2026-09-27 用户口径：示例只在第一次用的时候给，
-           后续提问不再重复；点"＋ 新对话"回到空会话又会显示） -->
-      <div v-if="!store.hasAnyTurn" class="capability">
-        <div class="capability-label muted">可以这样说（{{ session.roleLabel }}）</div>
-        <div class="chips">
-          <button
-            v-for="text in examples"
-            :key="text"
-            class="chip"
-            :disabled="pending"
-            @click="useExample(text)"
-          >
-            {{ text }}
-          </button>
-        </div>
-      </div>
-
+      <!-- 能力入口：只在空态中央展示（2026-09-27 升级：示例随中央输入框走，
+           发过消息或恢复历史会话后不再重复；"＋ 新对话"回到空态又会显示） -->
       <ErrorState v-if="store.error" title="请求失败" :message="store.error" :show-retry="false" />
 
       <Composer
+        v-if="store.hasAnyTurn"
         ref="composerRef"
         v-model="draft"
         :suspended="suspended"
@@ -333,6 +358,25 @@ watch(() => store.activeTurnId, () => {
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-5);
+}
+
+/* 空态中央构图（hero）：问候 → 中央宽输入框 → 示例 chips，整组垂直+水平居中。
+   hero 在 messages（flex column）里靠 margin auto 占中；发消息后让位给消息流。 */
+.hero {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-4);
+}
+
+.hero-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .dock {

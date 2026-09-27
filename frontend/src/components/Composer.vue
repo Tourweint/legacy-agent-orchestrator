@@ -10,6 +10,9 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   // 方向二："改一下"触发的占位提示（覆盖默认 placeholder）
   hint: { type: String, default: '' },
+  // 形态：dock（底部常驻窄条，默认）| hero（空态中央宽输入框——DeepSeek 神似，
+  // 2026-09-27 用户口径：第一次对话时放中间、宽一点；有对话后回底部 dock）
+  variant: { type: String, default: 'dock' },
 })
 
 const emit = defineEmits(['update:modelValue', 'send', 'keydown'])
@@ -58,7 +61,7 @@ function onKeydown(e) {
 </script>
 
 <template>
-  <div class="composer">
+  <div class="composer" :class="variant">
     <input
       ref="inputEl"
       :value="modelValue"
@@ -122,6 +125,34 @@ function onKeydown(e) {
   border-radius: var(--radius-small);
 }
 
+/* 空态中央宽输入框（hero）：不扁平——更宽、圆角更大、内边距更厚、输入字号更大。
+   宽度按视口百分比自适应（约 50%，DeepSeek 神似；浏览器窄了自动变窄），
+   上限 680px 防超宽屏拉散。 */
+.composer.hero {
+  width: min(50vw, 680px);
+  max-width: 100%;
+  padding: 14px 10px 14px 18px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.composer.hero .input {
+  padding: var(--space-2) 6px;
+  font-size: var(--text-base);
+}
+
+.composer.hero .btn {
+  padding: 10px 18px;
+  font-size: var(--text-md);
+  border-radius: var(--radius-medium);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer {
+    transition: none;
+  }
+}
+
 @media (max-width: 480px) {
   .composer {
     flex-direction: column;
@@ -129,6 +160,11 @@ function onKeydown(e) {
 
   .composer .btn {
     width: 100%;
+  }
+
+  .composer.hero {
+    width: 100%;
+    padding: 12px 10px;
   }
 }
 </style>
