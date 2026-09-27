@@ -12,14 +12,13 @@ const store = useTaskStore()
 const session = useSessionStore()
 const draft = ref('')
 const listEl = ref(null)
+// 2026-09-27 单实例改造：hero（空态中央）与 dock（底部）是**同一个** Composer 实例，
+// 位置/形态由 .composer-host 的 has-turns 类切换 + CSS transition 平滑过渡
+// （不再双实例 v-if 互斥——那会造成"两个输入条"的歧义，且切换是瞬间跳变）。
 const composerRef = ref(null)
-// 空态中央输入框（hero）：与底部 dock 各一个实例，同一时刻只渲染其一（v-if 互斥）。
-// Ctrl/Cmd + K 聚焦当前可见的那个。
-const heroComposerRef = ref(null)
 
 function focusComposer() {
-  if (!store.hasAnyTurn) heroComposerRef.value?.focus()
-  else composerRef.value?.focus()
+  composerRef.value?.focus()
 }
 
 // 能力入口（示例话术）：一点即发。为什么要有它——评委不该为了看"能干什么"自己先想句子；
@@ -189,7 +188,7 @@ watch(() => store.activeTurnId, () => {
 </script>
 
 <template>
-  <section class="chat" aria-label="对话区域">
+  <section class="chat" :class="{ 'has-turns': store.hasAnyTurn }" aria-label="对话区域">
     <div
       ref="listEl"
       class="messages"
@@ -198,47 +197,9 @@ watch(() => store.activeTurnId, () => {
       aria-label="对话消息"
       @scroll.passive="onScroll"
     >
-      <!-- 空态 = DeepSeek 神似的中央构图（2026-09-27 用户口径，第二轮精简）：
-           放大镜 + 标题一行 → 中央宽输入框（发送按钮=右下角小圆）→ 输入框下方示例。
-           描述/示例标签都不显示（提示词已在输入框里），一旦发出第一条消息整体让位给消息流。 -->
-      <template v-if="!store.hasAnyTurn">
-        <div class="hero-layout">
-          <div class="hero-heading">
-            <IconSearch :size="22" :stroke-width="1.5" aria-hidden="true" />
-            <h2 class="hero-title">预约教室，从这里开始</h2>
-          </div>
-
-          <Composer
-            ref="heroComposerRef"
-            v-model="draft"
-            variant="hero"
-            :suspended="suspended"
-            :pending="pending"
-            :terminal="terminal"
-            :disabled="correcting || (pending && store.writeIssued)"
-            @send="send"
-            @keydown="handleKeydown"
-          />
-
-          <!-- 快捷发送：空态时放在中央输入框下方（用户口径：第一次给示例，后续不再重复） -->
-          <div class="hero-chips">
-            <div class="chips">
-              <button
-                v-for="text in examples"
-                :key="text"
-                class="chip"
-                :disabled="pending"
-                @click="useExample(text)"
-              >
-                {{ text }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- 会话 = 多轮；每轮 = 这一轮用户说过的话 + 该轮事件派生的助手消息 -->
-      <template v-else>
+      <!-- 会话 = 多轮；每轮 = 这一轮用户说过的话 + 该轮事件派生的助手消息。
+           空态时这里没有内容（标题/示例/输入条都是绝对定位层，见下方） -->
+      <template v-if="store.hasAnyTurn">
         <template v-for="(turn, ti) in store.turns" :key="turn.id">
         <div
           v-for="(text, ui) in turn.userMessages"
@@ -311,7 +272,32 @@ watch(() => store.activeTurnId, () => {
       </template>
     </div>
 
-    <div class="dock">
+    <!-- 空态标题：绝对定位在输入条上方（不占流；has-turns 时淡出）。
+         放大镜 + "预约教室，从这里开始"，与输入条成组随重心下移。 -->
+    <div class="hero-heading" aria-hidden="true">
+      <IconSearch :size="22" :stroke-width="1.5" />
+      <h2 class="hero-title">预约教室，从这里开始</h2>
+    </div>
+
+    <!-- 空态示例 chips：绝对定位在输入条下方（has-turns 时淡出） -->
+    <div class="hero-chips">
+      <div class="chips">
+        <button
+          v-for="text in examples"
+          :key="text"
+          class="chip"
+          :disabled="pending"
+          @click="useExample(text)"
+        >
+          {{ text }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 单实例输入条（2026-09-27）：空态在中央偏下（hero 形态），有对话落到底部（dock 形态）。
+         位置（top/width）与形态（padding/圆角/按钮尺寸）都由 has-turns 类切换触发 CSS 过渡，
+         "新对话 ↔ 对话"来回切换时输入条平滑移动，而不是瞬间跳变。 -->
+    <div class="composer-host" :class="{ 'has-stop': showCancel && !terminal }">
       <!-- 停止：写在输入框正上方（比一条横贯整屏的红条克制，也更像"随手可停"） -->
       <div v-if="showCancel && !terminal" class="stop-row">
         <button class="stop-btn" :title="stopHint" @click="cancelTask">
@@ -321,14 +307,12 @@ watch(() => store.activeTurnId, () => {
         <span class="stop-hint muted">{{ stopHint }}</span>
       </div>
 
-      <!-- 能力入口：只在空态中央展示（2026-09-27 升级：示例随中央输入框走，
-           发过消息或恢复历史会话后不再重复；"＋ 新对话"回到空态又会显示） -->
       <ErrorState v-if="store.error" title="请求失败" :message="store.error" :show-retry="false" />
 
       <Composer
-        v-if="store.hasAnyTurn"
         ref="composerRef"
         v-model="draft"
+        :variant="store.hasAnyTurn ? 'dock' : 'hero'"
         :suspended="suspended"
         :pending="pending"
         :terminal="terminal"
@@ -342,8 +326,10 @@ watch(() => store.activeTurnId, () => {
 
 <style scoped>
 /* 全屏工作台（2026-09-27）：对话区占满右侧整列——头部、消息区、输入区分三层，
-   只有消息区滚动；内容宽度上限 820px 并居中，宽屏下不拉散、也不缩成一条窄卡片。 */
+   只有消息区滚动；内容宽度上限 820px 并居中，宽屏下不拉散、也不缩成一条窄卡片。
+   position: relative 是绝对定位层（hero-heading / hero-chips / composer-host）的基准。 */
 .chat {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -360,31 +346,34 @@ watch(() => store.activeTurnId, () => {
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4) max(var(--space-5), calc((100% - 820px) / 2)) var(--space-5);
+  /* 底部输入条已改为绝对定位（不占流），消息区底部留出输入条高度 + 18px 留白，
+     最后一条消息滚动到底时不被输入条遮住 */
+  padding-bottom: 96px;
 }
 
-/* 空态中央构图（hero-layout）：放大镜+标题一行 → 中央宽输入框 → 示例 chips。
-   命名 hero-layout 而非 hero：Composer 的 hero 形态也叫 .hero，
-   撞名会让本容器的 flex-direction:column 等规则兜底污染输入条（2026-09-27 实测踩过）。
-   容器在 messages（flex column）里靠 margin 顶部留白 + 底部自适应占位——垂直重心略偏上
-   （用户口径"太居中了"：不再钉死在屏幕正中，接近 DeepSeek 的构图上移手感）；
-   水平仍居中。发消息后让位给消息流。 */
-.hero-layout {
-  /* 垂直重心：12vh → 10vh（2026-09-27 用户口径——加宽后仍"太靠中上"，往下挪一点；
-     保留"略偏上"的手感，不回到钉死正中） */
-  margin: 10vh auto auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-4);
-}
+/* ========== 空态中央构图（绝对定位层，单实例输入条） ==========
+   2026-09-27 单实例改造：hero-heading / hero-chips / composer-host 三个绝对定位层，
+   top 值成组（标题在输入条上方 8px、chips 在下方 16px），由 .chat.has-turns 类切换：
+   - 空态：整体停在 34vh（重心约 40%，用户口径"往下多移一点"，不再靠中上）；
+   - 有对话：composer-host 平滑下移到底部 dock（100% - 62px - 停按钮高度），
+     标题/chips 淡出（opacity 220ms），输入条形态同步从 hero 过渡到 dock。 */
 
 .hero-heading {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(34vh - 38px);
   display: flex;
   align-items: center;
   gap: var(--space-2);
   color: var(--accent-500);
+  opacity: 1;
+  transition: opacity 220ms var(--ease-standard);
+  pointer-events: none;
+}
+
+.chat.has-turns .hero-heading {
+  opacity: 0;
 }
 
 .hero-title {
@@ -394,20 +383,46 @@ watch(() => store.activeTurnId, () => {
 }
 
 .hero-chips {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(34vh + 86px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  /* 标题→输入框的 gap 已收窄到 8px（用户嫌远），输入框→示例 chips 补回 8px，
-     保持 16px 不挤（chips 是辅助入口，不该贴着输入条） */
-  margin-top: var(--space-2);
+  opacity: 1;
+  transition: opacity 220ms var(--ease-standard);
 }
 
-.dock {
-  flex-shrink: 0;
-  /* 底部留白 18px（2026-09-27 用户拍板"16~20 左右"）：输入框不再压着屏幕底边，
-     留出稳定间隙；顶部仍 8px，消息区与输入区保持紧凑 */
-  padding: var(--space-2) max(var(--space-5), calc((100% - 820px) / 2)) 18px;
+.chat.has-turns .hero-chips {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.composer-host {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 34vh;
+  width: min(64vw, 780px);
+  display: flex;
+  flex-direction: column;
+  --stop-h: 0px;
+  transition:
+    top 300ms var(--ease-standard),
+    width 300ms var(--ease-standard);
+  z-index: 2;
+}
+
+.chat.has-turns .composer-host {
+  /* dock 位置：底部留白 18px；出现停止按钮时整体上移 --stop-h（约 34px） */
+  top: calc(100% - 62px - var(--stop-h));
+  width: min(820px, calc(100% - 48px));
+}
+
+.composer-host.has-stop {
+  --stop-h: 34px;
 }
 
 .bubble {
@@ -563,8 +578,7 @@ watch(() => store.activeTurnId, () => {
 /* ========== 响应式 ========== */
 
 @media (max-width: 900px) {
-  .messages,
-  .dock {
+  .messages {
     padding-left: var(--space-4);
     padding-right: var(--space-4);
   }

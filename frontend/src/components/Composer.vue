@@ -89,7 +89,10 @@ function onKeydown(e) {
 </template>
 
 <style scoped>
-/* 输入条做成一个整体 dock：白底圆角容器，输入框去边框融入；聚焦时整体发光 */
+/* 输入条做成一个整体 dock：白底圆角容器，输入框去边框融入；聚焦时整体发光。
+   2026-09-27 单实例改造：hero ↔ dock 是同一个元素，位置由 ChatPane 的 .composer-host
+   控制（top/width），这里只过渡**形态**——padding/圆角/阴影/输入行高/按钮尺寸
+   平滑跟随位置一起变化（300ms 与 host 的 top/width 同步），不出现"边移动边跳变"。 */
 .composer {
   display: flex;
   align-items: center;
@@ -100,8 +103,10 @@ function onKeydown(e) {
   padding: 6px 6px 6px 12px;
   box-shadow: var(--shadow-xs);
   transition:
-    border-color var(--dur-fast) var(--ease-standard),
-    box-shadow var(--dur-fast) var(--ease-standard);
+    border-color 300ms var(--ease-standard),
+    box-shadow 300ms var(--ease-standard),
+    padding 300ms var(--ease-standard),
+    border-radius 300ms var(--ease-standard);
 }
 
 .composer:focus-within {
@@ -118,6 +123,9 @@ function onKeydown(e) {
      文字上 8px / 下 4.8px 不均。改 padding: 0 + 显式 line-height，文字必然垂直居中。 */
   padding: 0 4px;
   line-height: 32px;
+  transition:
+    line-height 300ms var(--ease-standard),
+    font-size 300ms var(--ease-standard);
 }
 
 .composer .input:focus {
@@ -133,24 +141,25 @@ function onKeydown(e) {
   border-radius: 50%;
   padding: 8px;
   justify-content: center;
+  transition:
+    width 300ms var(--ease-standard),
+    height 300ms var(--ease-standard),
+    padding 300ms var(--ease-standard);
 }
 
 .composer .btn .btn-label {
   display: none;
 }
 
-/* 空态中央宽输入框（hero）：不扁平——更宽、圆角更大、内边距更厚、输入字号更大。
-   宽度按视口百分比自适应（约 64%，DeepSeek 神似；浏览器窄了自动变窄），
-   上限 780px 防超宽屏拉散（2026-09-27 用户嫌 680 太窄，放宽到接近 dock 的 820）。
-   发送按钮做成**右下角小圆**（2026-09-27 用户口径）：只留发送图标、文字隐藏，
-   圆形 40px、按钮在 flex 最右。
+/* 空态中央宽输入框（hero）：不扁平——圆角更大、内边距更厚、输入字号更大。
+   ⚠️ 2026-09-27 单实例改造：**宽度不再由本组件控制**（width: 100% 撑满父层），
+   改由 ChatPane 的 .composer-host 控制（空态 min(64vw,780px) / 对话态 min(820px,…)），
+   这样 hero ↔ dock 切换时宽度能随 top 一起过渡，形态完全跟随位置。
    阴影用**上下对称的均匀淡影**（用户口径：--shadow-md 是纯下沉、上边没阴影太淡，
-   下边重；改四周均匀），边框自带 1px 细线，阴影只负责"浮起"。
-   ⚠️ margin: 0 必须显式写：元素同时带 .hero 类，ChatPane 的 .hero-layout（12vh auto auto）
-   会兜底作用到它（.composer.hero 特异性高但没写 margin）。 */
+   下边重；改四周均匀），边框自带 1px 细线，阴影只负责"浮起"。 */
 .composer.hero {
   margin: 0;
-  width: min(64vw, 780px);
+  width: 100%;
   max-width: 100%;
   padding: 14px 10px 14px 18px;
   border-radius: var(--radius-lg);
