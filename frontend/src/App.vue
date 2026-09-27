@@ -137,6 +137,7 @@ onUnmounted(() => {
         <button
           class="icon-btn"
           type="button"
+          :class="{ collapsed: sideCollapsed }"
           :title="sideCollapsed ? '展开会话列表' : '收起会话列表'"
           :aria-label="sideCollapsed ? '展开会话列表' : '收起会话列表'"
           :aria-expanded="!sideCollapsed"
@@ -183,6 +184,15 @@ onUnmounted(() => {
       </div>
 
       <div class="topbar-right">
+        <button
+          class="icon-btn"
+          type="button"
+          title="快捷键（按 ?）"
+          aria-label="查看快捷键"
+          @click="showShortcuts = true"
+        >
+          <span class="q-mark" aria-hidden="true">?</span>
+        </button>
         <ThemeToggle :theme="theme" @toggle="toggleTheme" />
         <div v-if="session.isLoggedIn" class="who">
           <span class="role">{{ session.roleLabel }}</span>
@@ -276,6 +286,21 @@ onUnmounted(() => {
   background: var(--surface-2);
   color: var(--text);
   border-color: transparent;
+}
+
+/* 收起按钮的图标随状态旋转 180°，给"收起/展开"一个看得见的手感 */
+.icon-btn svg {
+  transition: transform var(--dur-base) var(--ease-standard);
+}
+
+.icon-btn.collapsed svg {
+  transform: rotate(180deg);
+}
+
+.q-mark {
+  font-size: 15px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
 }
 
 .brand-mark {
@@ -472,13 +497,16 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr);
   overflow: hidden;
+  /* 收起/展开：左栏轨道宽度 268px ↔ 0 平滑过渡，对话区随之让位 */
+  transition: grid-template-columns var(--dur-base) var(--ease-standard);
 }
 
-/* 收起 = 完全隐藏（不留窄边）：对话区因此能把宽度用足。
-   必须改成**单列**：若仍保留两列（0 + 1fr），左栏 display:none 后不再占轨道，
-   ChatPane 会被 auto-placement 放进 0 宽的第一列——对话区整列塌成 0。 */
+/* 收起 = 左栏轨道塌到 0（左栏自身 width:0 + 内容裁切，见 ConversationList）。
+   必须保留两列结构：若改单列，grid auto-placement 会把对话区排进 0 宽的第一列，
+   整列塌成 0（2026-09-27 实测踩过）。两列 + 轨道 0 时对话区固定占第二列，
+   宽度随轨道动画从 979px 平滑扩到全宽。 */
 .views.side-collapsed {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 0 minmax(0, 1fr);
 }
 
 /* 窄屏：左栏改为对话框上方的一条横向列表（展开时），收起则完全隐藏 */

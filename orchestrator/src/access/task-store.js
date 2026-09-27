@@ -16,10 +16,12 @@ export class TaskStore {
     terminalTtlMs = TERMINAL_TTL_MS,
     suspendedTtlMs = SUSPENDED_TTL_MS,
     interfaceNames = {},
+    writeInterfaceIds = new Set(),
     propositionNames = {},
   } = {}) {
     // 事件文案用的名称表（唯一真相源在配置里，见 event-stream.js）
     this.interfaceNames = interfaceNames
+    this.writeInterfaceIds = writeInterfaceIds
     this.propositionNames = propositionNames
     this.stream = new EventStream()
     this.tasks = new Map() // taskId → { taskId, status, result, owner, entries(), createdAt, completedAt }
@@ -60,6 +62,7 @@ export class TaskStore {
       this.stream.publish(
         mapEntryToEvent(entry, {
           interfaceNames: this.interfaceNames,
+          writeInterfaceIds: this.writeInterfaceIds,
           propositionNames: this.propositionNames,
         }),
       )

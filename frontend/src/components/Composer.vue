@@ -8,6 +8,8 @@ const props = defineProps({
   pending: { type: Boolean, default: false },
   terminal: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
+  // 方向二："改一下"触发的占位提示（覆盖默认 placeholder）
+  hint: { type: String, default: '' },
 })
 
 const emit = defineEmits(['update:modelValue', 'send', 'keydown'])
@@ -25,6 +27,7 @@ defineExpose({ focus })
 // （"那再帮我看看后天"），引擎带着同一段会话的记忆接着办。所以终态不是禁用理由，
 // 只影响提示文案。
 const placeholder = computed(() => {
+  if (props.hint) return props.hint
   if (props.suspended) return '补充信息……'
   if (props.pending) return '正在办理……'
   if (props.terminal) return '继续说点什么，或接着办下一件……'
@@ -62,18 +65,6 @@ function onKeydown(e) {
       <IconSend :size="14" />
       {{ suspended ? '回复' : '发送' }}
     </button>
-  </div>
-
-  <div class="kb-hints muted" aria-hidden="true">
-    <kbd>Enter</kbd> 发送
-    <span class="kb-sep">·</span>
-    <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 发送
-    <span class="kb-sep">·</span>
-    <kbd>Ctrl</kbd>+<kbd>K</kbd> 聚焦输入
-    <span class="kb-sep">·</span>
-    <kbd>Esc</kbd> 清空/取消
-    <span class="kb-sep">·</span>
-    <kbd>?</kbd> 快捷键
   </div>
 </template>
 
@@ -113,32 +104,6 @@ function onKeydown(e) {
 .composer .btn {
   flex-shrink: 0;
   border-radius: var(--radius-small);
-}
-
-.kb-hints {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: var(--space-2);
-  font-size: 10px;
-  line-height: 1.4;
-}
-
-.kb-hints kbd {
-  display: inline-block;
-  padding: 1px 5px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  box-shadow: 0 1px 0 var(--border);
-}
-
-.kb-sep {
-  color: var(--text-faint);
-  margin: 0 2px;
 }
 
 @media (max-width: 480px) {

@@ -46,11 +46,14 @@ test('办成：判定与调用各自只报计数，折叠块默认收起', () =>
   assert.ok(texts.includes('调用 1 次，全部成功'))
   assert.equal(t.failCount, 0)
   assert.equal(t.defaultMode, 'collapsed', '办成时收起——一屏只剩结论')
-  // "部分展开"集合里只有理解行（它解释了"为什么它这么理解"）
+  // 2026-09-27 方向二：理解展示由消息流"理解卡"承接，思考过程不再强制焦点行——
+  // 办成（无失败链）时"部分展开"集合为空
   assert.deepEqual(
     t.lines.filter((l) => l.focus).map((l) => l.phase),
-    ['P1'],
+    [],
   )
+  // 理解行仍在 L2 列表里（展开思考过程还能回看"它听懂了什么"）
+  assert.ok(t.lines.some((l) => l.text.includes('识别为「借教室」')))
 })
 
 test('办不成：展开失败链（汇总行 + 失败行 + 理解行），其余仍收起', () => {
@@ -69,7 +72,8 @@ test('办不成：展开失败链（汇总行 + 失败行 + 理解行），其�
   )
 
   const focusTexts = t.lines.filter((l) => l.focus).map((l) => l.text)
-  assert.ok(focusTexts.includes('识别为「借教室」· 教室=数智楼123 · 日期=明天 · 时间=下午两点到四点'))
+  // 理解行不强制焦点（方向二：理解卡承接展示）——但仍在 L2 列表里
+  assert.ok(t.lines.some((l) => l.text.includes('识别为「借教室」· 教室=数智楼123')))
   assert.ok(focusTexts.includes('判定 5 项，其中 1 项没通过'), '汇总行要在——它是"为什么是这个结果"的来处')
   assert.ok(focusTexts.includes('这个时段是空的'), '失败项逐条要列出来')
   assert.equal(t.failCount, 1, '失败计数只数逐条判定项，不把汇总行算成第二项')

@@ -51,21 +51,10 @@ export class ChatBridge {
 
     const intentIds = this.store.intentList.map((i) => i.id)
     void intentIds
-    // P1 决策留痕：依据 = 意图计划闭集（模型原始输出不在证据链——非确定性不作依据）
-    this.#decide(taskContext, {
-      action: `decide:understand`,
-      input: { status: understanding.status, confidence: understanding.confidence },
-      basis: [{ spec: 'intent-plans.yaml' }],
-      conclusion: {
-        outcome: understanding.status === 'ok' ? 'INTENT_RESOLVED' : understanding.status.toUpperCase(),
-        summary:
-          understanding.status === 'ok'
-            ? this.#understandSummary(understanding)
-            : understanding.clarifyQuestion ?? understanding.reasoning ?? understanding.status,
-      },
-    })
 
     if (understanding.status === 'out-of-domain') {
+      // P1 决策留痕：依据 = 意图计划闭集（模型原始输出不在证据链——非确定性不作依据）
+      this.#decideUnderstand(taskContext, understanding, null)
       taskContext.outcome = {
         message: '这件事超出了我能代办的范围（我可以帮忙查询与预约校园教室），恕不能办理。',
       }
@@ -74,6 +63,7 @@ export class ChatBridge {
     }
     if (understanding.status === 'clarify') {
       // 闸门二：低置信 → 候选意图让用户选（E5）
+      this.#decideUnderstand(taskContext, understanding, null)
       this.#clarify(machine, taskContext, {
         kind: 'intent-choice',
         question: understanding.clarifyQuestion,
@@ -87,6 +77,10 @@ export class ChatBridge {
     const intent = this.store.getIntent(understanding.intent)
     taskContext.intent = intent
     taskContext.intentId = intent.id
+
+    // P1 决策留痕（带结构化载荷）：合并后的槽位才是"即将执行"的那份（跨追问轮累积），
+    // 前端据此渲染"理解卡"（intentName/slots/confidence）
+    this.#decideUnderstand(taskContext, understanding, taskContext.slots)
 
     // 闸门四（本次新增）：按角色判权限——**在任何调用之前**（决定 5 / I5）。
     // 放在槽位追问之前：权限不对时不该先去问"哪间教室"——那是多余且误导的交互。
@@ -278,17 +272,46 @@ export class ChatBridge {
   }
 
   /**
-   * 理解结果的展示文案（零术语 P1-3）：用业务名（"借教室"）与中文槽位短名，
-   * 不把 intentId（query-my-reservations）与英文键名（classroomName）甩到界面上。
+   * P1 理解决策留痕。mergedSlots 非空时带结构化载荷（intentName/slots/confidence），
+   * 供前端渲染"理解卡"；clarify/out-of-domain 不带（追问/拒绝不走卡片）。
    */
-  #understandSummary(understanding) {
+  #decideUnderstand(taskContext, understanding, mergedSlots) {
+    const payload = this.#understandPayload(understanding, mergedSlots)
+    this.#decide(taskContext, {
+      action: 'decide:understand',
+      input: { status: understanding.status, confidence: understanding.confidence },
+      basis: [{ spec: 'intent-plans.yaml' }],
+      conclusion: {
+        outcome: understanding.status === 'ok' ? 'INTENT_RESOLVED' : understanding.status.toUpperCase(),
+        summary: payload.text,
+        ...(mergedSlots ? { structured: payload } : {}),
+      },
+    })
+  }
+
+  /**
+   * 理解结果的人话与结构化载荷（同一份格式化逻辑：text 与 slots 同源同序，不另起第二套）。
+   * 槽位来自**合并后**的 taskContext.slots（跨追问轮累积）——那才是"即将执行"的那份。
+   * 零术语（P1-3）：用业务名（"借教室"）与中文槽位短名，不把 intentId 与英文键名甩到界面上。
+   */
+  #understandPayload(understanding, mergedSlots) {
     const plan = (this.store.intentList ?? []).find((i) => i.id === understanding.intent)
     const labels = this.store.getGlossary().slots
-    const parts = Object.entries(understanding.slots ?? {})
+    const pairs = Object.entries(mergedSlots ?? {})
       .filter(([, value]) => value !== null && value !== undefined && value !== '')
-      .map(([key, value]) => `${labels[key] ?? key}=${value}`)
+      .map(([key, value]) => ({ key, label: labels[key] ?? key, value }))
     const name = plan?.name ?? understanding.intent
-    return parts.length > 0 ? `识别为「${name}」；条件：${parts.join('、')}` : `识别为「${name}」`
+    const text =
+      pairs.length > 0
+        ? `识别为「${name}」；条件：${pairs.map((p) => `${p.label}=${p.value}`).join('、')}`
+        : `识别为「${name}」`
+    return {
+      text,
+      intentId: understanding.intent,
+      intentName: name,
+      slots: pairs,
+      confidence: understanding.confidence,
+    }
   }
 
   #decide(taskContext, { action, input, basis, conclusion, phase = 'P1', initiator, actingIdentity }) {

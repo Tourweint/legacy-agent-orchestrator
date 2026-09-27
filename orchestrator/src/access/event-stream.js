@@ -40,6 +40,19 @@ export function buildInterfaceNames(registry) {
 }
 
 /**
+ * 写接口 id 集合（sideEffect=true，接口注册表是唯一真相源）。
+ * 前端"写请求已发出"的判据（canCancel / 改口窗口）：只读查证调用不算"已开始办理"，
+ * 只有真正有副作用的写请求（提交/撤销/占座）才锁住改口。
+ */
+export function buildWriteInterfaceIds(registry) {
+  const out = new Set()
+  for (const item of registry?.interfaces ?? []) {
+    if (item?.id && item.sideEffect === true) out.add(item.id)
+  }
+  return out
+}
+
+/**
  * 从术语对照表派生 命题 id → 人话名。
  * 引擎配置（config/glossary.yaml）是唯一真相源——界面侧的 `GET /api/meta/glossary` 与
  * 事件文案用的是同一份，因此不会出现"界面说'这个时段是空的'、事件里写 P-SLOT-FREE"。
@@ -105,11 +118,12 @@ function decisionStatus(outcome) {
  * @param {object} [names]
  * @param {object} [names.factNames]        事实编号 → 人话名（默认内置表）
  * @param {object} [names.interfaceNames]   接口 id → 业务语义短名（buildInterfaceNames 从注册表派生）
+ * @param {object} [names.writeInterfaceIds] 写接口 id 集合（buildWriteInterfaceIds 从注册表派生）
  * @param {object} [names.propositionNames] 命题 id → 人话名（buildPropositionNames 从术语对照表派生）
  */
 export function mapEntryToEvent(
   entry,
-  { factNames = FACT_NAMES, interfaceNames = {}, propositionNames = {} } = {},
+  { factNames = FACT_NAMES, interfaceNames = {}, writeInterfaceIds = new Set(), propositionNames = {} } = {},
 ) {
   const base = {
     seq: entry.seq,
@@ -156,6 +170,9 @@ export function mapEntryToEvent(
     return {
       ...base,
       type: 'call',
+      // isWrite：接口注册表 sideEffect=true 才算是"写请求已发出"——
+      // 只读查证调用不算（改口窗口与取消按钮据此判定，见 task.js writeIssued）
+      isWrite: writeInterfaceIds.has(entry.action.slice('contact:'.length)),
       status: STATUS_BY_VERDICT[verdict] ?? 'done',
       text: `${label}${callDetailText(summary)}`,
     }
@@ -166,12 +183,21 @@ export function mapEntryToEvent(
   }
   if (entry.action.startsWith('decide:')) {
     const outcome = entry.conclusion?.outcome ?? ''
-    return {
+    const event = {
       ...base,
       type: 'decision',
       status: decisionStatus(outcome),
       text: summary,
     }
+    // decide:understand 的 ok 路径带结构化载荷（理解卡数据源）；澄清/越界等其他 decide 不带
+    const structured = entry.conclusion?.structured
+    if (structured) {
+      event.intentId = structured.intentId
+      event.intentName = structured.intentName
+      event.slots = structured.slots
+      event.confidence = structured.confidence
+    }
+    return event
   }
   if (entry.action.startsWith('audit:')) {
     return {

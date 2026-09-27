@@ -8,6 +8,7 @@ import ErrorState from './ErrorState.vue'
 import Composer from './Composer.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import AnswerBubble from './AnswerBubble.vue'
+import UnderstandingCard from './UnderstandingCard.vue'
 import { IconCheck } from '../icons/index.js'
 
 const store = useTaskStore()
@@ -47,9 +48,22 @@ function clarifyMessagesOf(turn) {
     .map((e) => ({ seq: e.seq, kind: e.type, text: e.text }))
 }
 
+// 理解卡数据源：这一轮 P1 的 decision 事件（带 intentName 的才是理解决策）。
+// 取**最新**一条——追问补槽位后引擎会再发一条，最新那条才是合并后"即将执行"的完整理解。
+function understandEventOf(turn) {
+  return [...turn.events].reverse().find((e) => e.type === 'decision' && e.intentName) ?? null
+}
+
 const pending = computed(() => store.taskStatus === 'running')
 const suspended = computed(() => store.taskStatus === 'suspended')
 const terminal = computed(() => store.taskStatus === 'terminal')
+
+// 方向二 · 改口：用户在运行中（写请求未发出）说的话 = 纠正理解——
+// 先取消原任务、**等它落终态**再按新说法起新轮（不假装已停住，I3）。
+const correcting = ref(false)
+const pendingText = ref('')
+// "改一下"按钮给的输入提示（聚焦输入框 + 换占位文案）
+const correctingHint = ref(false)
 
 // 停止按钮：能不能停由 store 说了算（它和后端的取消口径必须一致——
 // 界面上出现一个"点了没反应"的按钮，比没有按钮更糟）。
@@ -60,12 +74,30 @@ const stopHint = computed(() =>
     : '停止这次办理：还没有向系统提交任何变更',
 )
 
+// 写请求已发出（P3+）：理解卡"改一下"置灰（要改就等办完说"改成…"，走退旧办新）
+const cardFixDisabled = computed(() => store.writeIssued)
+
 async function send() {
   const text = draft.value.trim()
   if (!text) return
+
+  // 运行中：分两段。写请求未发出 → 这句话是改口（纠正理解）；
+  // 写请求已发出 → 输入框已禁用（Composer disabled），这里兜底忽略，不并发第二个任务。
+  if (pending.value) {
+    if (!store.writeIssued) {
+      draft.value = ''
+      correctingHint.value = false
+      stickToBottom.value = true
+      beginCorrect(text)
+    }
+    return
+  }
+
   draft.value = ''
+  correctingHint.value = false
   stickToBottom.value = true
   if (suspended.value) {
+    // 挂起追问的回复是**正常链路**，绝不能被当成改口（B2）
     await store.reply(text)
   } else {
     // 终态后继续说是合法的：同一段对话里接着办下一件（引擎带着上文理解）
@@ -73,6 +105,39 @@ async function send() {
   }
   scrollBottom()
 }
+
+function beginCorrect(text) {
+  correcting.value = true
+  pendingText.value = text
+  store.cancel()
+}
+
+// 原轮终态到达（取消收口完成，settleCancelledTurn 已判定）→ 自动按新说法起新轮
+watch(
+  () => store.taskStatus,
+  async (st) => {
+    if (!correcting.value) return
+    if (st === 'terminal') {
+      correcting.value = false
+      const text = pendingText.value
+      pendingText.value = ''
+      if (text) {
+        await store.startChat(text)
+        scrollBottom()
+      }
+    }
+  },
+)
+
+// "改一下"：聚焦输入框并给出纠正话术提示；一打字就恢复正常占位
+function correctFromCard() {
+  if (store.writeIssued) return
+  correctingHint.value = true
+  composerRef.value?.focus()
+}
+watch(draft, (v) => {
+  if (v && correctingHint.value) correctingHint.value = false
+})
 
 function chooseCandidate(candidate) {
   store.reply(candidate.name)
@@ -177,6 +242,24 @@ watch(() => store.activeTurnId, () => {
           {{ text }}
         </div>
 
+        <!-- 理解卡：用户消息之后、思考过程之前——先让人确认"它听懂了什么"（方向二） -->
+        <UnderstandingCard
+          v-if="understandEventOf(turn)"
+          :key="'uc' + ti"
+          :event="understandEventOf(turn)"
+          :readonly="turn.id !== store.activeTurnId"
+          :disabled="cardFixDisabled"
+          @correct="correctFromCard"
+        />
+
+        <!-- 改口中：原轮正在收口，提示用户稍候 -->
+        <div v-if="turn.id === store.activeTurnId && correcting" class="msg assistant animate-message-left">
+          <span class="avatar" aria-hidden="true"><IconCheck :size="13" /></span>
+          <div class="msg-body">
+            <span class="msg-text pending">正在按你的新说法重新理解……</span>
+          </div>
+        </div>
+
         <!-- 过程：折叠起来按需展开（默认收起；办不成时自动展开失败链） -->
         <ThinkingBlock
           :events="turn.events"
@@ -264,6 +347,12 @@ watch(() => store.activeTurnId, () => {
         :suspended="suspended"
         :pending="pending"
         :terminal="terminal"
+        :disabled="correcting || (pending && store.writeIssued)"
+        :hint="
+          correctingHint
+            ? '直接说正确说法，比如：不是周三，是周四'
+            : ''
+        "
         @send="send"
         @keydown="handleKeydown"
       />

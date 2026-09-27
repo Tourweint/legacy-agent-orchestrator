@@ -81,7 +81,8 @@ export function buildThinking(events = [], { taskStatus = 'idle', outcome = null
     const inPhase = list.filter((e) => (e.phase ?? 'P6') === phase)
     if (inPhase.length === 0) continue
 
-    // 理解结果：用户最关心"它到底听懂了什么"——即使是 decision，也归 L2（方案 §四 的例外）
+    // 理解结果归 L2（展开后能回看"它听懂了什么"）——展示承接已交给消息流的"理解卡"（2026-09-27 方向二），
+    // 所以**不再强制 focus**：办成/办不成时都不把它算进"部分展开"的焦点行，避免同一句理解出现两份。
     if (phase === 'P1') {
       for (const e of inPhase.filter((ev) => ev.type === 'decision')) lines.push(keyLine(phase, e))
     }
@@ -121,8 +122,8 @@ export function buildThinking(events = [], { taskStatus = 'idle', outcome = null
     const prev = lines[i - 1]
     if (prev && prev.phase === lines[i].phase) prev.focus = true
   }
-  // 理解结果永远出现在"部分展开"里：它解释了"为什么它这么理解"
-  for (const l of lines) if (l.phase === 'P1') l.focus = true
+  // （2026-09-27 方向二）不再强制 P1 focus：理解展示由消息流"理解卡"承接，
+  // 焦点行只留给失败链与不确定——办成/办不成时思考过程都不重复"识别为…"。
 
   const focusCount = lines.filter((l) => l.focus).length
   // 失败链 = focus 行里**不属于理解阶段**、且**是逐条判定项**的那些。

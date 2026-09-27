@@ -86,14 +86,36 @@ function startNew() {
   gap: var(--space-2);
   height: 100%;
   min-height: 0;
+  min-width: 0;
   padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
   background: var(--bg); /* 比对话区浅一档：一眼分得清"这是列表、那是对话" */
   border-right: var(--border-width) solid var(--border);
   overflow: hidden;
+  /* 收起动画：宽度/内边距/边框随 grid 轨道同步过渡；visibility 延迟到动画结束再隐藏，
+     展开时立即显示（这样动画期间列表是看得见的） */
+  transition:
+    width var(--dur-base) var(--ease-standard),
+    padding var(--dur-base) var(--ease-standard),
+    border-color var(--dur-base) var(--ease-standard),
+    visibility 0s linear var(--dur-base);
 }
 
+/* 收起：整列塌到 0 宽并裁切内容。不 display:none——左栏必须继续占住 grid 第一列，
+   对话区才稳定留在第二列（display:none 会让对话区被 auto-placement 挤进 0 宽列）。 */
 .side.collapsed {
-  display: none;
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right-color: transparent;
+  visibility: hidden;
+}
+
+.side:not(.collapsed) {
+  transition:
+    width var(--dur-base) var(--ease-standard),
+    padding var(--dur-base) var(--ease-standard),
+    border-color var(--dur-base) var(--ease-standard),
+    visibility 0s linear 0s;
 }
 
 .head {
@@ -117,13 +139,23 @@ function startNew() {
   padding-right: 6px;
 }
 
-/* 窄屏：左栏变成对话框上方的一条横向列表，限高以免把对话挤出屏幕 */
+/* 窄屏：左栏变成对话框上方的一条横向列表，限高以免把对话挤出屏幕。
+   窄屏下收起仍用 display:none（横条高度动画价值低，保持简单）。 */
 @media (max-width: 900px) {
   .side {
     height: auto;
     max-height: 38vh;
     border-right: none;
     border-bottom: var(--border-width) solid var(--border);
+  }
+
+  .side.collapsed {
+    display: none;
+    width: auto;
+  }
+
+  .side:not(.collapsed) {
+    transition: none;
   }
 }
 

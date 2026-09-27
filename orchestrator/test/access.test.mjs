@@ -652,3 +652,112 @@ test('会话记忆不跨用户：带别人的 conversationId 拿不到那些历�
     server.close()
   }
 })
+
+// ── 理解卡数据源（2026-09-27 方向二：扩展 decide:understand 载荷）─────────────
+
+test('ok 理解：decision 事件带结构化载荷（intentName/slots/confidence），供前端渲染理解卡', async () => {
+  const borrowOut = {
+    intent: 'borrow-classroom',
+    slots: { classroomName: '数智楼123', datePhrase: '明天', timeSegment: '下午' },
+    confidence: 0.9,
+    outOfDomain: false,
+  }
+  const { base, server } = await startServer({}, [borrowOut])
+  try {
+    const ctx = { base, cookie: (await teacherLogin(base)).cookie }
+    const post = await fetch(`${ctx.base}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...withCookie(ctx.cookie) },
+      body: JSON.stringify({ text: '帮我借明天下午数智楼123' }),
+    })
+    assert.equal(post.status, 200)
+    const { data } = await post.json()
+    await awaitTerminal(ctx, data.taskId)
+    const { events } = await readEvents(ctx, data.taskId)
+
+    const understand = events.find((e) => e.type === 'decision' && e.intentId)
+    assert.ok(understand, 'ok 路径要发出带结构化载荷的理解决策')
+    assert.equal(understand.intentId, 'borrow-classroom')
+    assert.equal(understand.intentName, '借教室')
+    assert.deepEqual(
+      understand.slots.map((s) => [s.key, s.label, s.value]),
+      [
+        ['classroomName', '教室', '数智楼123'],
+        ['datePhrase', '日期', '明天'],
+        ['timeSegment', '时间', '下午'],
+      ],
+      '槽位是中文 label + 原话片段',
+    )
+    assert.equal(understand.confidence, 0.9)
+    assert.ok(understand.text.includes('识别为「借教室」'), 'text 与结构化同源（同一份格式化）')
+    assert.ok(
+      understand.slots.some((s) => s.label === '教室' && s.value === '数智楼123'),
+      'text 与 slots 顺序同源，内容一致',
+    )
+  } finally {
+    server.close()
+  }
+})
+
+test('置信不达标（intent-choice 追问）：decision 事件不带结构化载荷', async () => {
+  // 低置信 → understanding status=clarify → 候选意图让用户选。此时不是"理解成功"，
+  // 不带结构化载荷（理解卡只渲染真正理解成功的那条）
+  const llmResponses = [
+    { intent: 'borrow-classroom', slots: { classroomName: '数智楼222' }, confidence: 0.35, outOfDomain: false },
+  ]
+  const { base, server } = await startServer({}, llmResponses)
+  try {
+    const ctx = { base, cookie: (await teacherLogin(base)).cookie }
+    const post = await fetch(`${ctx.base}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...withCookie(ctx.cookie) },
+      body: JSON.stringify({ text: '借教室' }),
+    })
+    assert.equal(post.status, 200)
+    const { data } = await post.json()
+
+    // 等到挂起（intent-choice 追问）
+    let snapshot
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) {
+      snapshot = (await getJson(ctx, `/api/tasks/${data.taskId}`)).body.data
+      if (snapshot.status !== 'running') break
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    assert.equal(snapshot.status, 'suspended')
+    assert.equal(snapshot.clarify.kind, 'intent-choice')
+
+    // 挂起任务的事件流不关闭（readEvents 会死等），改从证据链断言——
+    // 事件是证据的机械映射（event-stream.js），证据无 structured 载荷 ⇒ 事件必无
+    const { body: evidence } = await getJson(ctx, `/api/tasks/${data.taskId}/evidence`)
+    const understandEntries = evidence.data.entries.filter((e) => e.action === 'decide:understand')
+    assert.ok(understandEntries.length >= 1, '置信追问也有理解决策（现状留痕行为，保留）')
+    for (const en of understandEntries) {
+      assert.ok(!en.conclusion?.structured, '置信不达标不得带结构化载荷——理解卡只渲染理解成功的')
+    }
+  } finally {
+    server.close()
+  }
+})
+
+test('call 事件带 isWrite：写调用 true、只读查证 false（改口/取消窗口判据）', async () => {
+  // 前端"写请求已发出"按 isWrite 判定（与引擎 CANCELABLE_STATES 同一口径）：
+  // 只读查证调用不算——查证阶段仍可取消、仍可改口；提交这类副作用调用才算。
+  const ctx = await startServer({})
+  try {
+    ctx.cookie = (await teacherLogin(ctx.base)).cookie
+    const post = await postTask(ctx, {
+      intentId: 'borrow-classroom', slot: SLOT,
+      resources: [{ classroom: { classroomId: 5 } }],
+    })
+    const { taskId } = (await post.json()).data
+    await awaitTerminal(ctx, taskId)
+    const { events } = await readEvents(ctx, taskId)
+    const calls = events.filter((e) => e.type === 'call')
+    assert.ok(calls.length >= 2, '一次完整办理至少有一次只读查证 + 一次副作用提交')
+    assert.ok(calls.some((e) => e.isWrite === true), '提交预约这类副作用调用 isWrite=true')
+    assert.ok(calls.some((e) => e.isWrite === false), '查证列表/教室详情这类只读调用 isWrite=false')
+  } finally {
+    ctx.server.close()
+  }
+})

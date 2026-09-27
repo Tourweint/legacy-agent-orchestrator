@@ -27,6 +27,7 @@ import {
   mapEntryToEvent,
   sseFrame,
   buildInterfaceNames,
+  buildWriteInterfaceIds,
   buildPropositionNames,
 } from './event-stream.js'
 import { resolveSession, handleAuthRoute, AUTH_ERROR_CODES } from './auth-endpoints.js'
@@ -164,8 +165,9 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
   // 事件文案用的两张名称表：接口名从接口注册表派生、命题名从术语对照表派生
   //（都取自配置，不在这里另维护映射，见 event-stream.js）
   const interfaceNames = buildInterfaceNames(configStore.registry)
+  const writeInterfaceIds = buildWriteInterfaceIds(configStore.registry)
   const propositionNames = buildPropositionNames(configStore.getGlossary())
-  const taskStore = new TaskStore({ interfaceNames, propositionNames })
+  const taskStore = new TaskStore({ interfaceNames, writeInterfaceIds, propositionNames })
   // 会话记忆（跨轮）：一轮 chat 任务只承载一轮对话，任务落终态后运行栈即销毁——
   // 会话记忆负责把"上一句说了哪间教室/哪个时段"带进下一轮（见 conversation-store.js）
   const conversationStore = new ConversationStore()
@@ -590,7 +592,7 @@ export function createAccessServer({ configStore, transport, identityPool, adapt
         // 再重放快照点及之前的历史条目
         for (const entry of entriesSnapshot) {
           if (streamEnded) break
-          const event = mapEntryToEvent(entry, { interfaceNames, propositionNames })
+          const event = mapEntryToEvent(entry, { interfaceNames, writeInterfaceIds, propositionNames })
           writeEvent(event)
         }
         // 终态任务：重放完毕后关闭（终态事件已在重放中写入）

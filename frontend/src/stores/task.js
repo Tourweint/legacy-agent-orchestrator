@@ -92,13 +92,13 @@ export const useTaskStore = defineStore('task', {
     clarify: (s) => s.activeTurn?.clarify ?? null,
 
     terminalEvent: (s) => (s.activeTurn?.events ?? []).find((e) => e.type === 'terminal') ?? null,
-    // 取消按钮矩阵（§4.5/B8 + 2026-09-27 修正）：出现 P3+ 事件即写请求已发出 → 不可中断；
+    // 取消按钮矩阵（§4.5/B8 + 2026-09-27 修正 + 2026-09-27 方向二细化）：
+    // "写请求已发出"只看**有副作用的写调用**（call 事件 isWrite=true，来自接口注册表 sideEffect，
+    // 引擎在事件帧里透传）——只读查证调用不算：查证阶段仍可取消、仍可改口；
     // 挂起态与"运行中但尚未发出写请求"都可以取消——与引擎侧 CANCELABLE_STATES 同一口径，
     // 界面上不会出现"按钮点得动、后台却一律拒绝"的落差。
     writeIssued: (s) =>
-      (s.activeTurn?.events ?? []).some((e) =>
-        ['P3', 'P4', 'P5'].includes(e.phase ?? 'P6'),
-      ),
+      (s.activeTurn?.events ?? []).some((e) => e.type === 'call' && e.isWrite === true),
     canCancel: (s) => {
       const turn = s.activeTurn
       if (!turn) return false
