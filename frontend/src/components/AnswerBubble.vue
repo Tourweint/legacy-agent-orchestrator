@@ -49,6 +49,19 @@ const parsed = computed(() => {
 })
 
 const steps = computed(() => result.value?.steps ?? null)
+
+/**
+ * 结构化渲染（2026-09-27）：引擎侧列表类结论已是多行（`1. …\n2. …`），
+ * 这里按行拆成块级段落——换行不会再被折叠成"摞在一起"的一行；
+ * 以 `数字. ` 开头的行识别为列表项，悬挂缩进让序号与正文对齐。
+ */
+const paragraphs = computed(() =>
+  parsed.value.main
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+const isItem = (line) => /^\d+\.\s/.test(line)
 </script>
 
 <template>
@@ -63,7 +76,9 @@ const steps = computed(() => result.value?.steps ?? null)
       <span v-if="steps" class="steps mono">{{ steps }} 步</span>
     </div>
 
-    <p class="text">{{ parsed.main }}</p>
+    <template v-for="(line, i) in paragraphs" :key="i">
+      <p class="text" :class="{ item: isItem(line) }">{{ line }}</p>
+    </template>
   </div>
 </template>
 
@@ -135,15 +150,24 @@ const steps = computed(() => result.value?.steps ?? null)
   color: var(--text-muted);
 }
 
-/* 大字答案：这是用户要的那句话，值得用整个卡片的视觉重心去承载 */
+/* 大字答案：这是用户要的那句话，值得用整个卡片的视觉重心去承载。
+   结构化（2026-09-27）：多行结论按行渲染为块级段落，列表行（`N. `）悬挂缩进。 */
 .text {
-  margin: 0;
+  margin: 0.15em 0 0;
   font-size: var(--text-xl);
   font-weight: var(--weight-medium);
   line-height: 1.55;
   color: var(--text);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.text:first-child {
+  margin-top: 0;
+}
+
+.text.item {
+  padding-left: 2.4em;
+  text-indent: -2.4em;
 }
 
 @media (max-width: 480px) {

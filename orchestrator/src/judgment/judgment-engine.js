@@ -257,9 +257,12 @@ export class JudgmentEngine {
   #vars(ctx, evalResult = {}) {
     const f1 = ctx.facts.F1
     const matched = evalResult.matched
+    // 候选教室列表**结构化**（2026-09-27）：每条一行带序号，前端按行渲染；
+    // 模板里 "现有教室：{{candidates}}" 的冒号后接多行列表。
     const candidates = (f1?.meta?.candidates ?? [])
       .map((c) => `${c.building} ${c.roomNumber}（${c.capacity ?? '?'} 座）`)
-      .join('、')
+      .map((line, i) => `${i + 1}. ${line}`)
+      .join('\n')
     return {
       target: ctx.target.classroom,
       matched: matched

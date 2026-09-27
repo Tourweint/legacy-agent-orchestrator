@@ -638,7 +638,7 @@ export class RunEngine {
         message:
           all.length === 0
             ? '您名下当前没有生效中的预约，无需撤销。'
-            : `您名下没有匹配「${this.#hintText(hints)}」的预约。当前生效的预约：${this.#recordList(all)}。`,
+            : `您名下没有匹配「${this.#hintText(hints)}」的预约。当前生效的预约：\n${this.#recordList(all)}`,
         candidates: all,
       }
       machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'no-match' } })
@@ -646,7 +646,7 @@ export class RunEngine {
     }
     if (matched.length > 1) {
       taskContext.outcome = {
-        message: `您名下有 ${matched.length} 条匹配的预约：${this.#recordList(matched)}。请指明是哪一条（例如"退掉数智楼123那间"）。`,
+        message: `您名下有 ${matched.length} 条匹配的预约：\n${this.#recordList(matched)}\n请指明是哪一条（例如"退掉数智楼123那间"）。`,
         candidates: matched,
       }
       machine.fire('ENTITY_UNRESOLVED', { payload: { reason: 'ambiguous' } })
@@ -703,11 +703,16 @@ export class RunEngine {
     return out
   }
 
+  /**
+   * 记录列表的**结构化文案**（2026-09-27）：每条一行、带序号——不再用单行"；"拼接，
+   * 前端按行渲染成列表（AnswerBubble 识别 `^\d+\. ` 行做悬挂缩进）。
+   */
   #recordList(rows) {
     const time = this.store.getConstants().time
     return rows
       .map((row) => `${row.resourceName ?? `资源 ${row.resourceId}`}（${describeRangeHuman(row.start, row.end, time)}）`)
-      .join('；')
+      .map((line, i) => `${i + 1}. ${line}`)
+      .join('\n')
   }
 
   #hintText(hints) {
@@ -738,7 +743,7 @@ export class RunEngine {
     }
     const mine = (fact.value ?? []).filter((row) => row.status === 'ACTIVE')
     if (mine.length === 0) return '您名下当前没有生效中的预约。'
-    return `您名下当前有 ${mine.length} 条生效预约：${this.#recordList(mine)}。`
+    return `您名下当前有 ${mine.length} 条生效预约：\n${this.#recordList(mine)}`
   }
 
   // ── 私有工具 ──────────────────────────────────────────────────────────────

@@ -35,7 +35,10 @@ const STUDENT_EXAMPLES = [
 const examples = computed(() => (session.role === 'STUDENT' ? STUDENT_EXAMPLES : TEACHER_EXAMPLES))
 
 function useExample(text) {
-  if (pending.value || terminal.value) return
+  // 运行中/挂起点能力入口不接管（运行中让 send() 按改口语义处理，挂起时用户正在答追问）；
+  // **终态后必须可用**——"接着办下一件"是合法链路（2026-09-27 修复：恢复会话被标终态
+  // 后，入口点击曾被这里的 terminal 守卫挡住、零请求发出）。
+  if (pending.value || suspended.value) return
   draft.value = text
   send()
 }

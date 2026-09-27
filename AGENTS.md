@@ -29,6 +29,8 @@
 
 **结论白话化与完成态隐藏（2026-09-27）**：结论文案去编号/去 ISO——新增 `describeRangeHuman`（`2026-10-01 13:00–17:00` → `10月1日（周四）下午 1 点到 5 点`，`orchestrator/src/canonical/time.js`，与 ISO 版 `describeRange` 并存：结论给用户看白话、留痕保持明确格式）；判定命中话术、成功/撤销/幂等/查询列表全链路换白话（`predicates.js` `matchedSlotText`、`run-engine.js` 各分支、`task-runner.js` 补偿/撤销语）；**命题模板 `config/propositions.yaml` 的 `P-NOT-ALREADY-MINE`（幂等命中）与 `P-IS-MINE` 也去掉了 `预约 #…`（⚠️ 模板启动时加载，改后必须重启引擎）**。前端：**完成态隐藏思考**——`ChatPane.vue` 新增 `isFinished(turn)`（terminal / cancelled），思考块 `v-if="!isFinished(turn)"`（运行中/挂起展示思考，终态全部隐藏）；`AnswerBubble.vue` 删除"推算依据"区块（解析逻辑保留、不再渲染）。详见 [该变更记录](docs/变更记录/2026-09-27-结论白话化与完成态隐藏.md)。验证：引擎 `npm test` 202/202、`npm run check` 8/8+4/4、前端 `npm test` 10/10 + lint + build、浏览器端到端（新任务结论 `已为您办妥：数智楼 222，10月3日（周六）下午 1 点到 5 点`、终态无思考区、API 直连查询列表全白话）。⚠️ 历史会话（localStorage 缓存）仍显示旧文案属预期；"我订了哪些教室"偶发被 LLM 判域外（REJECTED）与相邻缺陷①同源。
 
+**结论结构化与多行渲染（2026-09-27）**：列表类结论不再单行"；"拼接——`#recordList`（预约列表）与 `judgment-engine` 候选教室都改为**每条一行带序号**（`1. 数智楼 222（10月1日（周四）下午 1 点到 5 点）`）；前端 `AnswerBubble.vue` 按 `\n` 拆块级段落、识别 `数字. ` 行做悬挂缩进（换行不再被折叠成一行）。**顺带修复**：`ChatPane.vue` 能力入口 `useExample` 的 `terminal` 守卫导致恢复会话后入口点击零请求（改为只挡 pending/suspended，终态后可"接着办下一件"）。详见 [该变更记录](docs/变更记录/2026-09-27-结论结构化与多行渲染.md)。验证：引擎 `npm test` 207/207、`npm run check` 8/8+4/4、前端 `npm test` 10/10 + lint + build、浏览器端到端（结构化入口与能力入口 chat 均多行渲染、请求真实发出）。⚠️ 历史会话（localStorage 缓存）仍显示旧单行格式属预期。
+
 - 交付物：`docs/` 下的基线文档、设计方案、变更记录、研发规范、实验、演示；实现期代码交付物：`orchestrator/`、`frontend/`、`deploy/`
 - 2026-09-24 在只被要求"写方案"时误产出的可运行代码骨架（原 `_prototype/`）**已整份删除**：其 7 条实测结论（V1–V7）与全部客观事实经逐条核验已落入 `docs/`；被删原因见 [交付物越界与降级处置](docs/变更记录/2026-09-24-交付物越界与降级处置.md)
 - 设计方案 **13 章已定稿**，各章待决项已汇总（见 `docs/设计方案/2026-09-25-方案待决项决策汇总.md`），并已完成**架构一审、二审、三审（均 2026-09-25）**：
@@ -155,7 +157,7 @@ start-all.bat deps   # 只做前置检查；engine / legacy / web / redis 为单
 # 编排引擎（阶段 0–8）
 cd orchestrator
 npm install        # 首次
-npm test           # 全部测试（202 个；含接入层 HTTP/SSE、会话记忆、事件文案、取消语义、理解卡载荷、白话化与混沌测试）
+npm test           # 全部测试（207 个；含接入层 HTTP/SSE、会话记忆、事件文案、取消语义、理解卡载荷、白话化、结构化与混沌测试）
 npm run check      # 8 条结构自检 + 4 条约束检查——改动后必跑，不过不允许继续开发
 npm run experiment # 混沌实验 D0–D6（需存量系统在线；默认撤防，实验内布防）
 npm start          # 启动引擎（8090；前置：存量系统/Redis 就绪；凭证走环境变量）：
