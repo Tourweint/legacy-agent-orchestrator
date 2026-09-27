@@ -126,10 +126,11 @@ function onKeydown(e) {
 
 /* 按钮统一纯图标（2026-09-27 用户口径："发送"两个字取消，只留小飞机 SVG）：
    dock 与 hero 都不显示文字，语义靠 aria-label/title 与 placeholder 承担。
-   dock 按钮因此收窄成一个紧凑色块，右侧不再有"没居中"的文字按钮。 */
+   dock 按钮因此收窄成一个紧凑色块；**dock 与 hero 都做成圆形**（用户口径：
+   第一次对话是圆的、第二次变方的不行——形状必须一致）。 */
 .composer .btn {
   flex-shrink: 0;
-  border-radius: var(--radius-small);
+  border-radius: 50%;
   padding: 8px;
   justify-content: center;
 }
@@ -139,18 +140,21 @@ function onKeydown(e) {
 }
 
 /* 空态中央宽输入框（hero）：不扁平——更宽、圆角更大、内边距更厚、输入字号更大。
-   宽度按视口百分比自适应（约 50%，DeepSeek 神似；浏览器窄了自动变窄），
-   上限 680px 防超宽屏拉散。发送按钮做成**右下角小圆**（2026-09-27 用户口径）：
-   只留发送图标、文字隐藏，圆形 40px、按钮在 flex 最右。
-   ⚠️ margin: 0 必须显式写：元素同时带 .hero 类，ChatPane 的 .hero（12vh auto auto）
+   宽度按视口百分比自适应（约 64%，DeepSeek 神似；浏览器窄了自动变窄），
+   上限 780px 防超宽屏拉散（2026-09-27 用户嫌 680 太窄，放宽到接近 dock 的 820）。
+   发送按钮做成**右下角小圆**（2026-09-27 用户口径）：只留发送图标、文字隐藏，
+   圆形 40px、按钮在 flex 最右。
+   阴影用**上下对称的均匀淡影**（用户口径：--shadow-md 是纯下沉、上边没阴影太淡，
+   下边重；改四周均匀），边框自带 1px 细线，阴影只负责"浮起"。
+   ⚠️ margin: 0 必须显式写：元素同时带 .hero 类，ChatPane 的 .hero-layout（12vh auto auto）
    会兜底作用到它（.composer.hero 特异性高但没写 margin）。 */
 .composer.hero {
   margin: 0;
-  width: min(50vw, 680px);
+  width: min(64vw, 780px);
   max-width: 100%;
   padding: 14px 10px 14px 18px;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 0 18px rgba(16, 24, 40, 0.07);
 }
 
 .composer.hero .input {

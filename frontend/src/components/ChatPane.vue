@@ -369,11 +369,13 @@ watch(() => store.activeTurnId, () => {
    （用户口径"太居中了"：不再钉死在屏幕正中，接近 DeepSeek 的构图上移手感）；
    水平仍居中。发消息后让位给消息流。 */
 .hero-layout {
-  margin: 12vh auto auto;
+  /* 垂直重心：12vh → 10vh（2026-09-27 用户口径——加宽后仍"太靠中上"，往下挪一点；
+     保留"略偏上"的手感，不回到钉死正中） */
+  margin: 10vh auto auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-2);
   width: 100%;
   padding: var(--space-4);
 }
@@ -396,6 +398,9 @@ watch(() => store.activeTurnId, () => {
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
+  /* 标题→输入框的 gap 已收窄到 8px（用户嫌远），输入框→示例 chips 补回 8px，
+     保持 16px 不挤（chips 是辅助入口，不该贴着输入条） */
+  margin-top: var(--space-2);
 }
 
 .dock {
