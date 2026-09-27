@@ -50,6 +50,8 @@ const currentPhaseName = computed(() => {
 })
 
 const title = computed(() => {
+  // 像 AI 聊天软件：收起时只露一个"思考"，点开才看到细节与标题（2026-09-27）
+  if (!expanded.value) return '思考'
   const t = thinking.value
   if (running.value) return `正在办理 · ${currentPhaseName.value}`
   if (suspended.value) return `等待你补充信息 · 已走 ${t.steps} 步`

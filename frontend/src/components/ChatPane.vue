@@ -8,7 +8,6 @@ import ErrorState from './ErrorState.vue'
 import Composer from './Composer.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import AnswerBubble from './AnswerBubble.vue'
-import UnderstandingCard from './UnderstandingCard.vue'
 import { IconCheck } from '../icons/index.js'
 
 const store = useTaskStore()
@@ -51,28 +50,14 @@ function clarifyMessagesOf(turn) {
     .map((e) => ({ seq: e.seq, kind: e.type, text: e.text }))
 }
 
-// 理解卡数据源：这一轮 P1 的 decision 事件（带 intentName 的才是理解决策）。
-// 取**最新**一条——追问补槽位后引擎会再发一条，最新那条才是合并后"即将执行"的完整理解。
-function understandEventOf(turn) {
-  return [...turn.events].reverse().find((e) => e.type === 'decision' && e.intentName) ?? null
-}
-
 const pending = computed(() => store.taskStatus === 'running')
 const suspended = computed(() => store.taskStatus === 'suspended')
 const terminal = computed(() => store.taskStatus === 'terminal')
-
-// 思考过程只在"任务正在进行"时展示（2026-09-27）：运行中/挂起让用户看得见在干什么；
-// 一旦落终态（办成/失败/取消）就整体隐藏——用户只需要最重要的结果。
-function isFinished(turn) {
-  return turn.status === 'terminal' || turn.cancelled === true
-}
 
 // 方向二 · 改口：用户在运行中（写请求未发出）说的话 = 纠正理解——
 // 先取消原任务、**等它落终态**再按新说法起新轮（不假装已停住，I3）。
 const correcting = ref(false)
 const pendingText = ref('')
-// "改一下"按钮给的输入提示（聚焦输入框 + 换占位文案）
-const correctingHint = ref(false)
 
 // 停止按钮：能不能停由 store 说了算（它和后端的取消口径必须一致——
 // 界面上出现一个"点了没反应"的按钮，比没有按钮更糟）。
@@ -83,9 +68,6 @@ const stopHint = computed(() =>
     : '停止这次办理：还没有向系统提交任何变更',
 )
 
-// 写请求已发出（P3+）：理解卡"改一下"置灰（要改就等办完说"改成…"，走退旧办新）
-const cardFixDisabled = computed(() => store.writeIssued)
-
 async function send() {
   const text = draft.value.trim()
   if (!text) return
@@ -95,7 +77,6 @@ async function send() {
   if (pending.value) {
     if (!store.writeIssued) {
       draft.value = ''
-      correctingHint.value = false
       stickToBottom.value = true
       beginCorrect(text)
     }
@@ -103,7 +84,6 @@ async function send() {
   }
 
   draft.value = ''
-  correctingHint.value = false
   stickToBottom.value = true
   if (suspended.value) {
     // 挂起追问的回复是**正常链路**，绝不能被当成改口（B2）
@@ -137,16 +117,6 @@ watch(
     }
   },
 )
-
-// "改一下"：聚焦输入框并给出纠正话术提示；一打字就恢复正常占位
-function correctFromCard() {
-  if (store.writeIssued) return
-  correctingHint.value = true
-  composerRef.value?.focus()
-}
-watch(draft, (v) => {
-  if (v && correctingHint.value) correctingHint.value = false
-})
 
 function chooseCandidate(candidate) {
   store.reply(candidate.name)
@@ -251,16 +221,6 @@ watch(() => store.activeTurnId, () => {
           {{ text }}
         </div>
 
-        <!-- 理解卡：用户消息之后、思考过程之前——先让人确认"它听懂了什么"（方向二） -->
-        <UnderstandingCard
-          v-if="understandEventOf(turn)"
-          :key="'uc' + ti"
-          :event="understandEventOf(turn)"
-          :readonly="turn.id !== store.activeTurnId"
-          :disabled="cardFixDisabled"
-          @correct="correctFromCard"
-        />
-
         <!-- 改口中：原轮正在收口，提示用户稍候 -->
         <div v-if="turn.id === store.activeTurnId && correcting" class="msg assistant animate-message-left">
           <span class="avatar" aria-hidden="true"><IconCheck :size="13" /></span>
@@ -269,9 +229,9 @@ watch(() => store.activeTurnId, () => {
           </div>
         </div>
 
-        <!-- 过程：只在任务进行中展示（运行中/挂起）；落终态后整体隐藏（2026-09-27） -->
+        <!-- 思考过程：像 AI 聊天软件一样——默认收起、可点开（2026-09-27 起终态不再隐藏）。
+             展开/收起与"办不成时部分展开失败链"由 ThinkingBlock 内部决定（useThinking 纯函数）。 -->
         <ThinkingBlock
-          v-if="!isFinished(turn)"
           :events="turn.events"
           :status="turn.status"
           :cancelled="turn.cancelled === true"
@@ -358,11 +318,6 @@ watch(() => store.activeTurnId, () => {
         :pending="pending"
         :terminal="terminal"
         :disabled="correcting || (pending && store.writeIssued)"
-        :hint="
-          correctingHint
-            ? '直接说正确说法，比如：不是周三，是周四'
-            : ''
-        "
         @send="send"
         @keydown="handleKeydown"
       />
