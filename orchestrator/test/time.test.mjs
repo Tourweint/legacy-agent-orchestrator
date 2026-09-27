@@ -15,6 +15,7 @@ import {
   checkLegacyTimeConstraints,
   toDisplayText,
   describeRange,
+  describeRangeHuman,
   TimeError,
 } from '../src/canonical/time.js'
 
@@ -128,6 +129,27 @@ test('describeRange 输出人可读的部署地墙钟文字', () => {
     timeOptions,
   )
   assert.equal(text, '2026-09-30 13:00–14:00')
+})
+
+test('describeRangeHuman 输出中文白话（用户结论出口）', () => {
+  // 2026-09-30 是周三；北京 13:00–14:00
+  assert.equal(
+    describeRangeHuman(
+      interpretLegacyTimestamp('2026-09-30T05:00:00Z'),
+      interpretLegacyTimestamp('2026-09-30T06:00:00Z'),
+      timeOptions,
+    ),
+    '9月30日（周三）下午 1 点到 2 点',
+  )
+  // 半点：16:30 → "下午 4 点半"
+  assert.equal(
+    describeRangeHuman(
+      interpretLegacyTimestamp('2026-10-01T08:30:00Z'),
+      interpretLegacyTimestamp('2026-10-01T09:30:00Z'),
+      timeOptions,
+    ),
+    '10月1日（周四）下午 4 点半到 5 点半',
+  )
 })
 
 // ---- 精确钟点表达（第 08 章 §7.1 第二类："一点到三点" 此前被漏实现）----------------

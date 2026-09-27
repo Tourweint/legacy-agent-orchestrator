@@ -82,7 +82,8 @@ test('正常链路：单资源提交成功 → 任务 DONE，预约 #120 入补�
   assert.equal(compensations[0].recordId, 120)
   assert.equal(compensations[0].revoked, false)
   assert.ok(conclusion.includes('已为您办妥'))
-  assert.ok(conclusion.includes('#120'))
+  assert.ok(conclusion.includes('数智楼 123'))
+  assert.ok(conclusion.includes('9月30日（周三）下午 1 点到 2 点')) // 2026-09-27 白话化：不再含 #120
 })
 
 test('只读意图：CHECK_ONLY → DONE，全程零写调用', async () => {
@@ -105,7 +106,7 @@ test('异常 1（半成功）：提交超时 → 查证命中本人记录 → DO
   }
   const { terminal, conclusion } = await execute(world, [{ classroom: { classroomId: 5 } }])
   assert.equal(terminal, 'DONE')
-  assert.ok(conclusion.includes('此前已办成'))
+  assert.ok(conclusion.includes('之前已经办好了')) // 幂等命中白话（2026-09-27）
 })
 
 test('异常 2（冲突歧义）：200+409 → 查证命中别人的记录 → REJECTED（不降级，J1）', async () => {
@@ -157,7 +158,8 @@ test('异常 5（查证未命中）：唯一回到副作用的边——重试后
   const { terminal, compensations, conclusion } = await execute(world, [{ classroom: { classroomId: 5 } }])
   assert.equal(terminal, 'DONE')
   assert.equal(compensations[0].recordId, 121) // 重试成功的那次入清单
-  assert.ok(conclusion.includes('#121'))
+  assert.ok(conclusion.includes('数智楼 123'))
+  assert.ok(conclusion.includes('9月30日（周三）下午 1 点到 2 点')) // 白话化后不再含 #121
 })
 
 test('降级成功（演示主场景）：123 被占 → 同楼栋不降容量换 222 → DONE', async () => {
@@ -173,7 +175,8 @@ test('降级成功（演示主场景）：123 被占 → 同楼栋不降容量�
   }
   const { terminal, results, steps, conclusion } = await execute(world, [{ classroom: { classroomId: 5 } }])
   assert.equal(terminal, 'DONE')
-  assert.ok(results[0].message.includes('#121'))
+  assert.ok(results[0].message.includes('数智楼 222'))
+  assert.ok(results[0].message.includes('9月30日（周三）下午 1 点到 2 点')) // 白话化后不再含 #121
   assert.ok(conclusion.includes('数智楼 222'))
   // 降级后走 GATHERING → VALIDATING 全量重验：4 + DEGRADABLE_CONFLICT + DEGRADE_ACCEPTED + 4 = 9 步
   assert.equal(steps, 9)
@@ -204,7 +207,8 @@ test('D7 多资源 + 补偿：第一间成功、第二间降级穷尽 → 回滚
   assert.equal(compensations[0].recordId, 120)
   assert.equal(compensations[0].revoked, true) // 降级穷尽才补偿（降级优先于补偿）
   assert.ok(conclusion.includes('已撤销此前完成的预订'))
-  assert.ok(conclusion.includes('#120（数智楼 123）'))
+  assert.ok(conclusion.includes('数智楼 123'))
+  assert.ok(conclusion.includes('9月30日（周三）下午 1 点到 2 点')) // 白话化后不再含 #120
 })
 
 test('补偿查证收敛：撤销超时 → 按 recordId 查证确认已生效 → 任务 FAILED（副作用已收敛）', async () => {
@@ -225,7 +229,8 @@ test('补偿查证收敛：撤销超时 → 按 recordId 查证确认已生效 �
   assert.equal(results0(world), 'DONE') // 第一间正常完成
   assert.equal(terminal, 'FAILED')
   assert.equal(compensations[0].revoked, true) // 查证确认撤销已生效（不重试撤销、不误判失败）
-  assert.ok(conclusion.includes('#120'))
+  assert.ok(conclusion.includes('数智楼 123'))
+  assert.ok(conclusion.includes('9月30日（周三）下午 1 点到 2 点'))
 })
 
 // 辅助：读取第一运行的终态（world 无状态记录，这里仅为可读性）
@@ -248,7 +253,8 @@ test('D7：第一间成功、第二间教室不存在（不可降级失败）→
   // §5.8 映射：最后一运行 REJECTED 且补偿清单非空 → 撤销第一间 → 任务 FAILED（借两间只成一件=整体未完成）
   assert.equal(terminal, 'FAILED')
   assert.equal(compensations[0].revoked, true)
-  assert.ok(conclusion.includes('#120'))
+  assert.ok(conclusion.includes('数智楼 123'))
+  assert.ok(conclusion.includes('9月30日（周三）下午 1 点到 2 点'))
 })
 
 test('单资源降级穷尽：候选耗尽 → REJECTED，话术说明已尝试的方案（§8.3）', async () => {

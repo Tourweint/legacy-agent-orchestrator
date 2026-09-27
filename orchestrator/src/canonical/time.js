@@ -493,3 +493,43 @@ export function describeRange(start, end, options) {
   const toDay = sameDay ? '' : `（至 ${pe.year}-${pad(pe.month)}-${pad(pe.day)}）`
   return `${day} ${from}–${to}${toDay}`
 }
+
+/**
+ * 区间的**中文白话**（用户可见出口，2026-09-27）：
+ * `2026-10-01 13:00–17:00` → `10月1日（周四）下午 1 点到 5 点`。
+ * 与 describeRange 并存：机器/留痕用 ISO 明确格式，结论给用户看白话；
+ * 跨天时给出起止两天（J4 禁跨自然日，此处仅兜底不编造）。
+ */
+export function describeRangeHuman(start, end, options) {
+  const offset = assertOptions(options)
+  const ps = wallParts(start, offset)
+  const pe = wallParts(end, offset)
+  const sameDay =
+    ps.year === pe.year && ps.month === pe.month && ps.day === pe.day
+  const WEEK = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] // isoWeekday：周一=0 … 周日=6
+  const dayOf = (p) => `${p.month}月${p.day}日`
+  const partOf = (p) =>
+    p.hour < 6
+      ? '凌晨'
+      : p.hour < 9
+        ? '早上'
+        : p.hour < 12
+          ? '上午'
+          : p.hour < 13
+            ? '中午'
+            : p.hour < 18
+              ? '下午'
+              : '晚上'
+  const clock = (p, dropPart = false) => {
+    let h = p.hour % 12
+    if (h === 0) h = 12
+    const minute = p.minute === 0 ? '' : p.minute === 30 ? '半' : ` ${p.minute} 分`
+    return `${dropPart ? '' : partOf(p) + ' '}${h} 点${minute}`
+  }
+  if (sameDay) {
+    // 结束点与开始点同一时段词时，结束时省略"下午/晚上"这类词（"下午 1 点到 2 点"）
+    const drop = partOf(pe) === partOf(ps)
+    return `${dayOf(ps)}（${WEEK[ps.isoWeekday]}）${clock(ps)}到${drop ? ' ' : ''}${clock(pe, drop)}`
+  }
+  return `${dayOf(ps)}（${WEEK[ps.isoWeekday]}）${clock(ps)}至${dayOf(pe)}（${WEEK[pe.isoWeekday]}）${clock(pe)}`
+}

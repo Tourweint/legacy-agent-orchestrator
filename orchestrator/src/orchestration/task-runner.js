@@ -316,6 +316,7 @@ export class TaskRunner {
     const compensations = taskContext.compensations.map((c) => ({
       recordId: c.recordId,
       label: c.label,
+      slotText: c.slotText,
       revoked: c.revoked,
     }))
     const conclusion = this.#conclusion(terminal, taskContext)
@@ -371,7 +372,12 @@ export class TaskRunner {
       const failed = results.filter((r) => r.terminal !== 'DONE')
       parts.push(failed.map((r) => r.message).filter(Boolean).join(' '))
       if (revoked.length > 0 && terminal === 'FAILED') {
-        parts.push(`已撤销此前完成的预订：${revoked.map((c) => `#${c.recordId}（${c.label}）`).join('、')}。`)
+        // 2026-09-27 白话化：不再给"#记录号"，给资源与白话时段
+        parts.push(
+          `已撤销此前完成的预订：${revoked
+            .map((c) => `${c.label}${c.slotText ? `（${c.slotText}）` : ''}`)
+            .join('、')}。`,
+        )
       }
       if (terminal === 'UNRESOLVED') {
         parts.push('该任务存在未能收敛的副作用或未知状态，需人工介入。')

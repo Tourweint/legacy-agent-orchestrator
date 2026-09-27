@@ -87,8 +87,9 @@ test('自己已提交（C6 幂等命中）→ ALREADY_DONE 事件 + 话术含记
   assert.equal(mine.conclusion, 'VIOLATED')
   assert.equal(mine.violatedEvent, 'ALREADY_DONE')
   assert.equal(mine.alreadyDone, true)
-  assert.ok(mine.message.includes('预约 #118'))
-  assert.ok(mine.message.includes('13:00')) // J2：完整给出已有时段
+  assert.ok(mine.message.includes('之前已经办好了')) // 2026-09-27 白话化：不再出现"预约 #"
+  assert.ok(mine.message.includes('数智楼 123'))
+  assert.ok(mine.message.includes('下午 1 点')) // J2：完整给出已有时段（2026-09-27 起中文白话）
   assert.equal(result.summary.alreadyDone, true)
 })
 
@@ -124,7 +125,7 @@ test('维修窗口：ACTIVE 重叠 → 不成立（话术含窗口时段）；CA
   const violated = byId(active, 'P-NOT-UNDER-MAINTENANCE')
   assert.equal(violated.conclusion, 'VIOLATED')
   assert.ok(violated.message.includes('检修'))
-  assert.ok(violated.message.includes('12:00')) // 窗口 04:00Z–07:00Z = 北京 12:00–15:00
+  assert.ok(violated.message.includes('中午 12 点')) // 窗口 04:00Z–07:00Z = 北京 12:00–15:00（2026-09-27 起白话）
 
   const cancelled = await evaluate({
     maintenanceRows: [{ id: 3, resourceType: 'CLASSROOM', resourceId: 5, classroomId: 5, startTime: '2026-09-30T04:00:00', endTime: '2026-09-30T07:00:00', status: 'CANCELLED' }],

@@ -35,7 +35,8 @@ const conclusion = computed(() => result.value?.conclusion ?? terminalEvent.valu
 /**
  * 引擎会把"推算依据"（§7.3 请确认）拼在结论末尾，如
  * "该时段不可用：… （请确认：今天是周日…；「上午」= 08:00–12:00…）"。
- * 那是过程性说明，不该抢大字的位置——拆成小字附注。不新造句子，只是分层展示。
+ * 2026-09-27 起推算依据不再展示（用户只看最重要的结果）——这里仍把它从正文里剥掉，
+ * 避免"（请确认：…）"残留在大字结论里。不新造句子，只是分层。
  */
 const parsed = computed(() => {
   const text = conclusion.value
@@ -63,13 +64,6 @@ const steps = computed(() => result.value?.steps ?? null)
     </div>
 
     <p class="text">{{ parsed.main }}</p>
-
-    <div v-if="parsed.notes.length" class="notes">
-      <div class="notes-label">推算依据（如有出入，请接着说一句更正）</div>
-      <ul>
-        <li v-for="(n, i) in parsed.notes" :key="i">{{ n }}</li>
-      </ul>
-    </div>
   </div>
 </template>
 
@@ -150,26 +144,6 @@ const steps = computed(() => result.value?.steps ?? null)
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.notes {
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px dashed var(--border);
-}
-
-.notes-label {
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-  margin-bottom: var(--space-1);
-}
-
-.notes ul {
-  margin: 0;
-  padding-left: 1.1em;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
 }
 
 @media (max-width: 480px) {

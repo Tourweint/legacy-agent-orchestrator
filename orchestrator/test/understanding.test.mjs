@@ -234,7 +234,8 @@ test('聊天全流程：一句话 → 全部槽位齐备 → 真实办理 → DO
   const outcome = await runner.executeChatTask({ text: '帮我借下周三下午数智楼222', identity: sessionIdentity('TEACHER') })
   assert.ok(!outcome.suspended)
   assert.equal(outcome.result.terminal, 'DONE')
-  assert.ok(outcome.result.conclusion.includes('#120'))
+  assert.ok(outcome.result.conclusion.includes('数智楼 222'))
+  assert.ok(outcome.result.conclusion.includes('9月30日（周三）下午 1 点到 5 点')) // 白话化后不再含 #120
   assert.ok(outcome.result.conclusion.includes('请确认')) // §7.3：推算结果必须展示
   // P1 段留痕：理解决策进链（结构化结果），模型原始输出不进
   const understand = chain.getEntries().find((e) => e.action === 'decide:understand')
@@ -252,8 +253,8 @@ test('精确区间端到端：说"下午两点到四点"直接按该区间办理
   })
   assert.ok(!outcome.suspended, '精确区间不该再被追问')
   assert.equal(outcome.result.terminal, 'DONE')
-  // §7.3：推算结果照常展示，供用户当场纠正
-  assert.match(outcome.result.conclusion, /14:00–16:00/)
+  // §7.3：推算结果照常展示，供用户当场纠正（2026-09-27 起给中文白话）
+  assert.match(outcome.result.conclusion, /下午 2 点到 4 点/)
 })
 
 test('只说了一个钟点 → 追问用到几点（不猜默认时长）', async () => {

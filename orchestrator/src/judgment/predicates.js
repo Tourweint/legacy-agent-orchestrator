@@ -5,7 +5,7 @@
 //   label    失败叶子的 as 标签，用于路由命题的分支失败话术（violatedMessages）
 //   matched  命中的记录（重叠记录/维修窗口），供话术渲染与 J2 追加条件使用
 
-import { rangesOverlap, describeRange } from '../canonical/time.js'
+import { rangesOverlap, describeRangeHuman } from '../canonical/time.js'
 import { JudgmentError } from './judgment-error.js'
 
 export function normalizeSpace(value) {
@@ -225,8 +225,8 @@ export function renderTemplate(template, vars) {
   })
 }
 
-/** 已有记录的人可读时段（J2：幂等命中话术必须完整给出已有记录的时段）。 */
+/** 已有记录的人可读时段（J2：幂等命中话术必须完整给出已有记录的时段；2026-09-27 起中文白话）。 */
 export function matchedSlotText(matched, timeOptions) {
   if (!matched?.start || !matched?.end) return '(未知时段)'
-  return describeRange(matched.start, matched.end, timeOptions)
+  return describeRangeHuman(matched.start, matched.end, timeOptions)
 }

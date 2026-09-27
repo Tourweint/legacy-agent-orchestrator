@@ -29,7 +29,7 @@ propositions:
     skipWhen: {op: record-unknown}          # 目标记录没定位到时本命题无意义（由定位步给话术）
     when: {op: record-in-mine, fact: F5}
     violatedMessage: >-
-      这条预约（#{{target.recordId}}）不在您名下或已不生效，我不能替您撤销。
+      这条预约不在您名下或已不生效，我不能替您撤销。
     degradable: false
     invariants: [I2, I5]
 
@@ -71,7 +71,7 @@ propositions:
     # 终态特例（决策 C6）：本命题不成立不落拒绝，落幂等命中 DONE（事件 ALREADY_DONE）
     violatedEvent: ALREADY_DONE
     violatedMessage: >-
-      已为您办妥：此事此前已办成（预约 #{{matched.recordId}}，{{matched.slotText}}），未重复提交。
+      已为您办妥：这件事之前已经办好了（{{matched.resourceName}}，{{matched.slotText}}），没有重复提交。
     violatedAppendix:
       when: {op: slot-exceeds-matched}     # J2：申请区间超出已有时段时追加提示
       message: 如需完整时段，请先撤销原预约再重新提交。

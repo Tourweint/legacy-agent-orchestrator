@@ -254,7 +254,7 @@ test('术语对照表下发：未登录 401，登录后拿到事实/命题/规�
 
 // ── 原有结构化任务路径（现在都要先登录）────────────────────────────────────
 
-test('正常任务：POST 返回 taskId → 快照到达 DONE → 结论含预约号', async () => {
+test('正常任务：POST 返回 taskId → 快照到达 DONE → 结论为白话（不再暴露预约号）', async () => {
   const ctx = await startServer({})
   try {
     ctx.cookie = (await teacherLogin(ctx.base)).cookie
@@ -271,7 +271,11 @@ test('正常任务：POST 返回 taskId → 快照到达 DONE → 结论含预�
 
     const snapshot = await awaitTerminal(ctx, postBody.data.taskId)
     assert.equal(snapshot.result.terminal, 'DONE')
-    assert.ok(snapshot.result.conclusion.includes('#120'))
+    // 2026-09-27 白话化：结论文案给中文时段、不再出现"预约 #/记录 #"内部编号
+    assert.ok(snapshot.result.conclusion.includes('已为您办妥'))
+    assert.ok(snapshot.result.conclusion.includes('数智楼 123'))
+    assert.ok(snapshot.result.conclusion.includes('9月30日（周三）下午 1 点到 2 点'))
+    assert.ok(!snapshot.result.conclusion.includes('#120'))
     assert.equal(snapshot.owner, '233') // 任务记在发起人名下（影响面 #12）
   } finally {
     ctx.server.close()

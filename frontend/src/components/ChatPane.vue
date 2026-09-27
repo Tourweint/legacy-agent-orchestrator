@@ -58,6 +58,12 @@ const pending = computed(() => store.taskStatus === 'running')
 const suspended = computed(() => store.taskStatus === 'suspended')
 const terminal = computed(() => store.taskStatus === 'terminal')
 
+// 思考过程只在"任务正在进行"时展示（2026-09-27）：运行中/挂起让用户看得见在干什么；
+// 一旦落终态（办成/失败/取消）就整体隐藏——用户只需要最重要的结果。
+function isFinished(turn) {
+  return turn.status === 'terminal' || turn.cancelled === true
+}
+
 // 方向二 · 改口：用户在运行中（写请求未发出）说的话 = 纠正理解——
 // 先取消原任务、**等它落终态**再按新说法起新轮（不假装已停住，I3）。
 const correcting = ref(false)
@@ -260,8 +266,9 @@ watch(() => store.activeTurnId, () => {
           </div>
         </div>
 
-        <!-- 过程：折叠起来按需展开（默认收起；办不成时自动展开失败链） -->
+        <!-- 过程：只在任务进行中展示（运行中/挂起）；落终态后整体隐藏（2026-09-27） -->
         <ThinkingBlock
+          v-if="!isFinished(turn)"
           :events="turn.events"
           :status="turn.status"
           :cancelled="turn.cancelled === true"

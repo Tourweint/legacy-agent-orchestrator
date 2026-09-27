@@ -9,7 +9,7 @@
 import { OrchestrationError } from './orchestration-error.js'
 import { isTerminal } from './state-machine.js'
 import { normalizeSpace } from '../judgment/predicates.js'
-import { describeRange, resolveRelativeRange } from '../canonical/time.js'
+import { describeRangeHuman, resolveRelativeRange } from '../canonical/time.js'
 import { parseClassroomName } from '../canonical/classroom-name.js'
 
 /**
@@ -310,7 +310,7 @@ export class RunEngine {
             `${taskContext.currentTarget?.building ?? ''} ${taskContext.currentTarget?.roomNumber ?? ''}`.trim() ??
             ''
           const slotText = taskContext.slot
-            ? describeRange(taskContext.slot.start, taskContext.slot.end, this.store.getConstants().time)
+            ? describeRangeHuman(taskContext.slot.start, taskContext.slot.end, this.store.getConstants().time)
             : ''
           // 撤销类意图（compensation: null）不往补偿清单里塞东西：撤销是目的，不是需要回滚的副作用
           if (taskContext.intent.compensation) {
@@ -363,12 +363,13 @@ export class RunEngine {
         const item = taskContext.compensations[taskContext.compensations.length - 1]
         const effect = taskContext.lastEffect
         const recordId = effect?.recordId ?? item?.recordId ?? null
-        // 话术优先级：计划声明的成功话术（撤销/改期这类"目的型"意图）→ 补偿条目（新建预约）→ 兜底
+        // 话术优先级：计划声明的成功话术（撤销/改期这类"目的型"意图）→ 补偿条目（新建预约）→ 兜底。
+        // 2026-09-27 白话化：不再向用户暴露"记录 #/预约 #"这类内部编号，时段给中文白话。
         const message = taskContext.intent.successMessage
-          ? `${taskContext.intent.successMessage}（记录 #${recordId ?? '—'}${effect?.slotText ? `，${effect.slotText}` : ''}）`
+          ? `${taskContext.intent.successMessage}${effect?.slotText ? `：${effect.slotText}` : ''}`
           : item
-            ? `已为您办妥：${item.label ?? ''}（预约 #${item.recordId}，${item.slotText ?? ''}）${taskContext.outcome?.exempt?.length ? '（未能确认是否重复）' : ''}${this.#degradeNote(taskContext)}`
-            : `已为您处理（记录 #${recordId ?? '—'}）。`
+            ? `已为您办妥：${item.label ?? ''}${item.slotText ? `，${item.slotText}` : ''}${taskContext.outcome?.exempt?.length ? '（此前已办成，未重复提交）' : ''}${this.#degradeNote(taskContext)}`
+            : '已为您办妥。'
         taskContext.outcome = { message, recordId }
         machine.fire('JUDGE_SUCCESS')
       } else {
@@ -419,10 +420,11 @@ export class RunEngine {
           conclusion: { outcome: v.outcome, summary: v.summary },
         })
         if (v.outcome === 'FOUND') {
+          // 白话（2026-09-27）：去掉记录编号，改期语境给出新时段
           taskContext.outcome = {
             message: taskContext.intent.successMessage
-              ? `${taskContext.intent.successMessage}（已确认：记录 #${targetRecordId} 不再生效${taskContext.lastEffect?.recordId ? `，新记录 #${taskContext.lastEffect.recordId}` : ''}）`
-              : `已为您撤销：记录 #${targetRecordId} 已不再生效。`,
+              ? `${taskContext.intent.successMessage}${taskContext.lastEffect?.slotText ? `：新时段 ${taskContext.lastEffect.slotText}` : ''}，原来的预约已撤销。`
+              : '已为您撤销：该预约已不再生效。',
             recordId: targetRecordId,
           }
           machine.fire('VERIFY_FOUND', { payload: 'mine' }) // forward + mine → DONE（撤销即目的）
@@ -447,7 +449,13 @@ export class RunEngine {
         conclusion: { outcome: v.outcome, summary: v.summary },
       })
       if (v.outcome === 'FOUND_MINE') {
-        taskContext.outcome = { message: `已为您办妥：此事此前已办成（预约 #${v.matched?.recordId}），未重复提交。`, recordId: v.matched?.recordId }
+        const label = v.matched
+          ? `${v.matched.building ?? ''} ${v.matched.roomNumber ?? ''}`.trim()
+          : ''
+        taskContext.outcome = {
+          message: `已为您办妥：这件事之前已经办好了${label ? `（${label}` : ''}${v.matched?.slotText ? `${label ? '，' : '（'}${v.matched.slotText}` : ''}${label || v.matched?.slotText ? '）' : ''}，没有重复提交。`,
+          recordId: v.matched?.recordId,
+        }
         machine.fire('VERIFY_FOUND', { payload: 'mine' })
       } else if (v.outcome === 'FOUND_OTHERS') {
         taskContext.outcome = { message: '该教室在这段时间已被预约。' }
@@ -698,7 +706,7 @@ export class RunEngine {
   #recordList(rows) {
     const time = this.store.getConstants().time
     return rows
-      .map((row) => `${row.resourceName ?? `资源 ${row.resourceId}`}（${describeRange(row.start, row.end, time)}）`)
+      .map((row) => `${row.resourceName ?? `资源 ${row.resourceId}`}（${describeRangeHuman(row.start, row.end, time)}）`)
       .join('；')
   }
 
