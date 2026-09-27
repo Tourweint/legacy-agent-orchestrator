@@ -11,7 +11,7 @@ defineProps({
 
 <template>
   <div class="line" :class="'st-' + line.status">
-    <span class="phase mono">{{ line.phaseName }}</span>
+    <span v-if="line.phaseName" class="phase mono">{{ line.phaseName }}</span>
     <span class="mark" aria-hidden="true">
       <IconCheck v-if="line.status === 'done'" :size="11" class="ok" />
       <IconX v-else-if="line.status === 'failed'" :size="11" class="bad" />

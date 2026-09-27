@@ -5,7 +5,7 @@
 
 import { computed, ref, watch } from 'vue'
 import { buildThinking, formatDuration } from '../composables/useThinking.js'
-import ThinkingLine from './ThinkingLine.vue'
+import ThinkingGroup from './ThinkingGroup.vue'
 import TrajectoryItem from './TrajectoryItem.vue'
 import { IconChevronDown, IconChevronRight } from '../icons/index.js'
 
@@ -44,33 +44,42 @@ const expanded = computed(() =>
 const fullView = computed(
   () => expanded.value && (showAll.value || thinking.value.defaultMode === 'full'),
 )
-const visibleLines = computed(() =>
-  fullView.value ? thinking.value.lines : thinking.value.lines.filter((l) => l.focus),
-)
+// 可见行：全览 → 全部；否则只显示焦点行（失败链/不确定）。
+// 兜底：焦点行为空时（如旧版历史会话缓存的事件没有 focus 行）退回全部行，
+// 避免"展开后只见按钮不见内容"。
+const visibleLines = computed(() => {
+  const all = thinking.value.lines
+  if (fullView.value) return all
+  const focused = all.filter((l) => l.focus)
+  return focused.length > 0 ? focused : all
+})
 
 const running = computed(() => props.status === 'running')
 const suspended = computed(() => props.status === 'suspended')
 const hasFailures = computed(() => props.status === 'terminal' && thinking.value.failCount > 0)
 
-/** 运行中标题跟随当前阶段，让"它正在干什么"一眼可见。 */
-const currentPhaseName = computed(() => {
-  const last = props.events[props.events.length - 1]
-  const phase = last?.phase ?? 'P6'
-  return thinking.value.lines.find((l) => l.phase === phase)?.phaseName ?? '办理'
+// 标题口径（2026-09-27 用户拍板）："思考"二字不动，只加耗时——
+// 展开/收起都是"思考 · N 秒"（运行中秒数实时涨，不再显示阶段名/失败数，
+// 因为具体步骤展开后直接可见，标题保持简短）。没有耗时数据（如历史会话缓存）
+// 时只显示"思考"，不出现"思考 · 0 秒"。
+const headTitle = computed(() => {
+  const ms = thinking.value.durationMs
+  return ms > 0 ? `思考 · ${formatDuration(ms)}` : '思考'
 })
 
-const title = computed(() => {
-  // 像 AI 聊天软件：收起时只露一个"思考"，点开才看到细节与标题（2026-09-27）
-  if (!expanded.value) return '思考'
-  const t = thinking.value
-  if (running.value) return `正在办理 · ${currentPhaseName.value}`
-  if (suspended.value) return `等待你补充信息 · 已走 ${t.steps} 步`
-  if (props.cancelled) return `已停止 · 完成 ${t.steps} 步`
-  // "为什么是这个结果"而不是"为什么没办成"：查询类同样会有不成立的命题，
-  // 而那时用户要问的是"你凭什么这么答"，不是"哪里办错了"。
-  if (hasFailures.value) return `为什么是这个结果 · ${t.failCount} 项不通过`
-  return `思考过程 · ${t.steps} 步 · ${formatDuration(t.durationMs)}`
-})
+// 中间过程按类型分两小节（书式展开的"两个小部分"）：
+//   · "思考了什么"：理解 / 判定 / 结果判断（decision / proposition-judged / uncertain）
+//   · "执行了什么"：对存量系统的调用（call）
+// 按行自带 type 分组（不按阶段——查询类调用常发生在判定阶段，仍属"执行"），
+// 分组在 visibleLines（焦点行/全部行）之后做，保持原顺序。
+const thinkLines = computed(() => visibleLines.value.filter((l) => l.type !== 'call'))
+// 执行组行隐藏事件阶段名（调用常发生在判定阶段，"判定 ✔ 调用 3 次"既重复又违和），
+// 行首直接是状态符号 + 文本；文本本身已说明动作。
+const execLines = computed(() =>
+  visibleLines.value
+    .filter((l) => l.type === 'call')
+    .map((l) => ({ ...l, phaseName: '' })),
+)
 
 function toggle() {
   manual.value = !expanded.value
@@ -80,28 +89,33 @@ function toggle() {
 <template>
   <div v-if="thinking.steps > 0" class="thinking" :class="{ running, failed: hasFailures }">
     <button class="head" :aria-expanded="expanded" @click="toggle">
+      <span class="title">{{ headTitle }}</span>
+      <span v-if="running" class="pulse-dot" aria-hidden="true"></span>
       <span class="chev" aria-hidden="true">
         <IconChevronDown v-if="expanded" :size="14" />
         <IconChevronRight v-else :size="14" />
       </span>
-      <span class="title">{{ title }}</span>
-      <span v-if="running" class="pulse-dot" aria-hidden="true"></span>
     </button>
 
-    <div v-show="expanded" class="body">
-      <ThinkingLine v-for="l in visibleLines" :key="`${l.phase}-${l.seq ?? l.text}`" :line="l" />
+    <Transition name="expand">
+      <div v-show="expanded" class="body">
+        <div class="body-inner">
+          <ThinkingGroup title="思考了什么" :lines="thinkLines" />
+          <ThinkingGroup title="执行了什么" :lines="execLines" />
 
-      <button v-if="!fullView && thinking.hiddenCount > 0" class="more" @click="showAll = true">
-        其余 {{ thinking.hiddenCount }} 步
-      </button>
+          <button v-if="!fullView && thinking.hiddenCount > 0" class="more" @click="showAll = true">
+            其余 {{ thinking.hiddenCount }} 步
+          </button>
 
-      <button v-if="!showDetails" class="more" @click="showDetails = true">
-        查看完整留痕（{{ thinking.details.length }} 条）
-      </button>
-      <div v-else class="details">
-        <TrajectoryItem v-for="e in thinking.details" :key="e.seq" :event="e" />
+          <button v-if="!showDetails" class="more" @click="showDetails = true">
+            查看完整留痕（{{ thinking.details.length }} 条）
+          </button>
+          <div v-else class="details">
+            <TrajectoryItem v-for="e in thinking.details" :key="e.seq" :event="e" />
+          </div>
+        </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
@@ -139,22 +153,55 @@ function toggle() {
   border-radius: var(--radius-xs);
 }
 
+/* 小箭头在右侧（2026-09-27 用户口径）：标题与脉冲点在左，chevron 殿后 */
 .chev {
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  margin-left: 2px;
 }
 
 .title {
   font-weight: var(--weight-medium);
 }
 
+/* 展开/收起动画：高度 0 ↔ 自适应 + 淡入淡出，约 200ms 平滑滑开/收拢。
+   grid-template-rows 过渡对"内容高度不固定"也自适应（再展开"其余 N 步/完整留痕"
+   不会跳变）；内层 overflow hidden 是 0fr 折叠的必要条件。 */
 .body {
+  display: grid;
+  grid-template-rows: 1fr;
   margin: var(--space-1) 0 var(--space-2);
   padding: 0 0 0 var(--space-5);
   background: transparent;
   border-radius: 0;
   border-left: none;
+}
+
+.body-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.expand-enter-active,
+.expand-leave-active {
+  transition:
+    grid-template-rows var(--dur-base) var(--ease-standard),
+    opacity var(--dur-base) var(--ease-standard);
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expand-enter-active,
+  .expand-leave-active,
+  .line-enter-active {
+    transition: none;
+  }
 }
 
 .more {

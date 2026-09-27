@@ -43,11 +43,12 @@ function keyLine(phase, event, focus = false) {
     status: event.status ?? 'done',
     text: event.text ?? '',
     focus,
+    type: event.type ?? 'step',
   }
 }
 
-function summaryLine(phase, status, text, focus) {
-  return { seq: null, phase, phaseName: PHASE_NAMES[phase] ?? phase, status, text, focus }
+function summaryLine(phase, status, text, focus, type = 'step') {
+  return { seq: null, phase, phaseName: PHASE_NAMES[phase] ?? phase, status, text, focus, type }
 }
 
 /**
@@ -92,21 +93,21 @@ export function buildThinking(events = [], { taskStatus = 'idle', outcome = null
     if (judged.length > 0) {
       const bad = judged.filter((e) => BAD_STATUS.has(e.status))
       if (bad.length === 0) {
-        lines.push(summaryLine(phase, 'done', `判定 ${judged.length} 项全部通过`, false))
+        lines.push(summaryLine(phase, 'done', `判定 ${judged.length} 项全部通过`, false, 'proposition-judged'))
       } else {
-        lines.push(summaryLine(phase, 'failed', `判定 ${judged.length} 项，其中 ${bad.length} 项没通过`, true))
+        lines.push(summaryLine(phase, 'failed', `判定 ${judged.length} 项，其中 ${bad.length} 项没通过`, true, 'proposition-judged'))
         for (const e of bad) lines.push(keyLine(phase, e, true))
       }
     }
 
-    // 调用：同一口径
+    // 调用：同一口径（type=call，界面据此归"执行了什么"）
     const calls = inPhase.filter((e) => e.type === 'call')
     if (calls.length > 0) {
       const bad = calls.filter((e) => BAD_STATUS.has(e.status))
       if (bad.length === 0) {
-        lines.push(summaryLine(phase, 'done', `调用 ${calls.length} 次，全部成功`, false))
+        lines.push(summaryLine(phase, 'done', `调用 ${calls.length} 次，全部成功`, false, 'call'))
       } else {
-        lines.push(summaryLine(phase, 'failed', `调用 ${calls.length} 次，${bad.length} 次没成功`, true))
+        lines.push(summaryLine(phase, 'failed', `调用 ${calls.length} 次，${bad.length} 次没成功`, true, 'call'))
         for (const e of bad) lines.push(keyLine(phase, e, true))
       }
     }
