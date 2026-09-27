@@ -7,12 +7,13 @@ import ConversationList from './components/ConversationList.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import LoginView from './views/LoginView.vue'
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal.vue'
+import DebugModal from './components/DebugModal.vue'
 import { useTheme } from './composables/useTheme.js'
 import { useSessionStore } from './stores/session.js'
 import { useTaskStore } from './stores/task.js'
 import { useGlossaryStore } from './stores/glossary.js'
 import { useConversationsStore } from './stores/conversations.js'
-import { IconSidebar } from './icons/index.js'
+import { IconSidebar, IconTerminal } from './icons/index.js'
 
 const session = useSessionStore()
 const glossary = useGlossaryStore()
@@ -41,6 +42,8 @@ watch(
 const store = useTaskStore()
 const { theme, toggleTheme } = useTheme()
 const showShortcuts = ref(false)
+// 调试入口（结构化任务）：2026-09-27 从对话区底部移到顶栏图标按钮（主页更大气）
+const showDebug = ref(false)
 
 // SSE 连接状态指示器（仅在有任务时显示）
 const connectionView = computed(() => {
@@ -143,6 +146,15 @@ onUnmounted(() => {
         <button
           class="icon-btn"
           type="button"
+          title="调试入口（结构化任务）"
+          aria-label="调试入口"
+          @click="showDebug = true"
+        >
+          <IconTerminal :size="16" />
+        </button>
+        <button
+          class="icon-btn"
+          type="button"
           title="快捷键（按 ?）"
           aria-label="查看快捷键"
           @click="showShortcuts = true"
@@ -175,6 +187,7 @@ onUnmounted(() => {
     </main>
 
     <KeyboardShortcutsModal :visible="showShortcuts" @close="showShortcuts = false" />
+    <DebugModal :visible="showDebug" @close="showDebug = false" />
   </div>
 </template>
 

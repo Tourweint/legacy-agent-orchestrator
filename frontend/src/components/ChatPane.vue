@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTaskStore } from '../stores/task.js'
 import { useSessionStore } from '../stores/session.js'
-import DebugTaskPanel from './DebugTaskPanel.vue'
 import EmptyState from './EmptyState.vue'
 import ErrorState from './ErrorState.vue'
 import Composer from './Composer.vue'
@@ -308,11 +307,6 @@ watch(() => store.activeTurnId, () => {
         @send="send"
         @keydown="handleKeydown"
       />
-
-      <details class="debug">
-        <summary class="muted">调试入口（结构化任务）</summary>
-        <DebugTaskPanel />
-      </details>
     </div>
   </section>
 </template>
@@ -501,20 +495,6 @@ watch(() => store.activeTurnId, () => {
 .chip:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-.debug {
-  margin-top: var(--space-3);
-  font-size: var(--text-xs);
-}
-
-.debug summary {
-  cursor: pointer;
-  padding: var(--space-1) 0;
-}
-
-.debug summary:hover {
-  color: var(--text);
 }
 
 /* ========== 响应式 ========== */

@@ -16,12 +16,15 @@ const draft = ref(
   )
 )
 const error = ref('')
+const emit = defineEmits(['submitted'])
 
 async function submit() {
   error.value = ''
   try {
     const task = JSON.parse(draft.value)
     await store.startStructured(task)
+    // 提交成功即关闭弹窗，页面直接看任务跑（2026-09-27）
+    emit('submitted')
   } catch (err) {
     error.value = `JSON 解析失败：${err.message}`
   }

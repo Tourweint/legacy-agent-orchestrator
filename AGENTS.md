@@ -41,6 +41,8 @@
 
 **品牌图标落地（2026-09-27）**："预约教室助手"品牌图标（AI 生成 + 白底 flood-fill 抠图 + 羽化 + 多尺寸压缩，源文件与处理脚本在仓库根 `品牌图标/`）替换进产品：① `frontend/public/favicon.png`（64px/4.8KB）替换 `index.html` 的 favicon 引用；② `frontend/public/brand-icon.png`（128px/14KB）替换 `App.vue` 顶栏与 `LoginView.vue` 登录页的 `.brand-mark`（原"渐变底+IconCheck 对勾"改为 `<img>`，删 `IconCheck` 导入，原 favicon.svg 保留未删）。详见 [该变更记录](docs/变更记录/2026-09-27-品牌图标落地.md)。验证：前端 `npm test` 10/10 + lint + build、浏览器（左上角品牌图正常、favicon/brand-icon 请求 ok）。
 
+**调试入口移至顶栏（2026-09-27）**：结构化任务调试入口从对话区底部移到顶栏——新增 `DebugModal.vue`（居中弹窗：标题/说明/`DebugTaskPanel`/关闭，遮罩或 × 关闭）；`App.vue` 顶栏右侧新增 `IconTerminal` 图标按钮（快捷键 `?` 之前）打开弹窗；`ChatPane.vue` 删除底部 `<details class="debug">` 调试区（含样式与 import）；`DebugTaskPanel` 提交成功后 `emit('submitted')` → 弹窗自动关闭。详见 [该变更记录](docs/变更记录/2026-09-27-调试入口移至顶栏.md)。验证：前端 `npm test` 10/10 + lint + build、浏览器（顶栏图标开弹窗、提交后自动关、任务正常、底部无调试区）。
+
 - 交付物：`docs/` 下的基线文档、设计方案、变更记录、研发规范、实验、演示；实现期代码交付物：`orchestrator/`、`frontend/`、`deploy/`
 - 2026-09-24 在只被要求"写方案"时误产出的可运行代码骨架（原 `_prototype/`）**已整份删除**：其 7 条实测结论（V1–V7）与全部客观事实经逐条核验已落入 `docs/`；被删原因见 [交付物越界与降级处置](docs/变更记录/2026-09-24-交付物越界与降级处置.md)
 - 设计方案 **13 章已定稿**，各章待决项已汇总（见 `docs/设计方案/2026-09-25-方案待决项决策汇总.md`），并已完成**架构一审、二审、三审（均 2026-09-25）**：
